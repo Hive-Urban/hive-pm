@@ -29,6 +29,23 @@ const PRIORITY_ORDER: Record<string, number> = {
   urgent: 0, high: 1, medium: 2, low: 3,
 };
 
+const STATUS_STYLE: Record<string, string> = {
+  "to-do": "bg-gray-800/60 text-gray-300 border-gray-600/50",
+  "todo": "bg-gray-800/60 text-gray-300 border-gray-600/50",
+  "backlog": "bg-stone-800/60 text-stone-300 border-stone-600/50",
+  "not started": "bg-slate-800/60 text-slate-300 border-slate-600/50",
+  "in progress": "bg-blue-900/50 text-blue-300 border-blue-700/50",
+  "blocked": "bg-red-900/50 text-red-300 border-red-700/50",
+  "done": "bg-emerald-900/50 text-emerald-300 border-emerald-700/50",
+  "complete": "bg-emerald-900/50 text-emerald-300 border-emerald-700/50",
+  "approved": "bg-violet-900/50 text-violet-300 border-violet-700/50",
+};
+
+const STATUS_ORDER: Record<string, number> = {
+  "to-do": 0, "todo": 0, "backlog": 1, "not started": 2,
+  "in progress": 3, "blocked": 4, "done": 5, "complete": 6, "approved": 7,
+};
+
 export default function NotionTaskPicker({ pillarId, onClose, onDone }: {
   pillarId: string;
   onClose: () => void;
@@ -51,7 +68,8 @@ export default function NotionTaskPicker({ pillarId, onClose, onDone }: {
   }, []);
 
   const types = Array.from(new Set(tasks.map(t => t.type).filter(Boolean))) as string[];
-  const statuses = Array.from(new Set(tasks.map(t => t.status).filter(Boolean))) as string[];
+  const statuses = (Array.from(new Set(tasks.map(t => t.status).filter(Boolean))) as string[])
+    .sort((a, b) => (STATUS_ORDER[a.toLowerCase()] ?? 99) - (STATUS_ORDER[b.toLowerCase()] ?? 99));
   const priorities = Array.from(new Set(tasks.map(t => t.priority).filter(Boolean)) as Set<string>)
     .sort((a, b) => (PRIORITY_ORDER[a.toLowerCase()] ?? 99) - (PRIORITY_ORDER[b.toLowerCase()] ?? 99));
 
@@ -143,15 +161,28 @@ export default function NotionTaskPicker({ pillarId, onClose, onDone }: {
             </div>
           )}
 
-          {/* Status + Date filter */}
-          <div className="flex gap-3 items-center flex-wrap">
-            <span className="text-xs text-gray-600">Status:</span>
-            <select value={statusFilter ?? ""} onChange={e => setStatusFilter(e.target.value || null)}
-              className="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-indigo-500">
-              <option value="">All statuses</option>
-              {statuses.map(s => <option key={s} value={s}>{s}</option>)}
-            </select>
+          {/* Status filter */}
+          {statuses.length > 0 && (
+            <div className="flex gap-2 flex-wrap items-center">
+              <span className="text-xs text-gray-600">Status:</span>
+              <button onClick={() => setStatusFilter(null)}
+                className={clsx("px-2.5 py-1 rounded-full text-xs border transition-colors",
+                  !statusFilter ? "bg-indigo-600 text-white border-indigo-500" : "border-gray-700 text-gray-400 hover:border-gray-500")}>
+                All
+              </button>
+              {statuses.map(s => (
+                <button key={s} onClick={() => setStatusFilter(statusFilter === s ? null : s)}
+                  className={clsx("px-2.5 py-1 rounded-full text-xs border transition-colors capitalize",
+                    statusFilter === s ? "bg-indigo-600 text-white border-indigo-500"
+                      : (STATUS_STYLE[s.toLowerCase()] ?? "border-gray-700 text-gray-400"))}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
 
+          {/* Date filter */}
+          <div className="flex gap-3 items-center flex-wrap">
             <span className="text-xs text-gray-600">Created after:</span>
             <input type="date" value={sinceDate} onChange={e => setSinceDate(e.target.value)}
               className="bg-gray-800 border border-gray-700 text-gray-300 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:border-indigo-500" />
@@ -202,7 +233,12 @@ export default function NotionTaskPicker({ pillarId, onClose, onDone }: {
                       </span>
                     )}
                     {task.sprint && <span className="text-xs text-gray-600">{task.sprint}</span>}
-                    {task.status && <span className="text-xs text-gray-600">{task.status}</span>}
+                    {task.status && (
+                      <span className={clsx("text-xs px-1.5 py-0.5 rounded border capitalize",
+                        STATUS_STYLE[task.status.toLowerCase()] ?? "border-gray-700 text-gray-400")}>
+                        {task.status}
+                      </span>
+                    )}
                   </div>
                 </div>
 
