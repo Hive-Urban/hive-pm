@@ -12,7 +12,7 @@ function extractText(prop: any): string {
 }
 
 function extractSelect(prop: any): string | null {
-  return prop?.select?.name ?? null;
+  return prop?.select?.name ?? prop?.status?.name ?? null;
 }
 
 function extractMultiSelect(prop: any): string[] {
