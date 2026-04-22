@@ -9,7 +9,7 @@ export async function GET() {
       .from("pillars")
       .select(`
         *,
-        tasks (id, status)
+        tasks (*)
       `)
       .order("order_index");
 

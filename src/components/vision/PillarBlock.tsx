@@ -54,6 +54,7 @@ export default function PillarBlock({ pillar, index, onUpdate, onDelete }: {
   const [addingTask, setAddingTask] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showNotionPicker, setShowNotionPicker] = useState(false);
+  const [statusView, setStatusView] = useState<"all" | "active" | "done">("all");
 
   async function reloadTasks() {
     const res = await fetch(`/api/pillars/${pillar.id}/tasks`);
@@ -63,6 +64,17 @@ export default function PillarBlock({ pillar, index, onUpdate, onDelete }: {
 
   const done = tasks.filter(t => t.status === "done").length;
   const active = tasks.length - done;
+
+  const sortedTasks = [...tasks].sort((a, b) => {
+    const aCreated = (a as Task & { created_at?: string }).created_at ?? "";
+    const bCreated = (b as Task & { created_at?: string }).created_at ?? "";
+    return aCreated.localeCompare(bCreated);
+  });
+  const visibleTasks = sortedTasks.filter(t => {
+    if (statusView === "active") return t.status !== "done";
+    if (statusView === "done") return t.status === "done";
+    return true;
+  });
   const progress = tasks.length > 0 ? Math.round((done / tasks.length) * 100) : 0;
   const hex = resolveColor(pillar.color);
 
@@ -143,13 +155,36 @@ export default function PillarBlock({ pillar, index, onUpdate, onDelete }: {
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider">משימות</p>
-            <button onClick={() => setShowNotionPicker(true)}
-              className="flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-600 text-xs rounded-lg transition-colors">
-              <RefreshCw size={12} /> Import from Notion
-            </button>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-0.5">
+                {([
+                  { key: "all", label: "All", count: tasks.length },
+                  { key: "active", label: "Active", count: active },
+                  { key: "done", label: "Done", count: done },
+                ] as const).map(opt => (
+                  <button key={opt.key} onClick={() => setStatusView(opt.key)}
+                    className={clsx("px-2.5 py-1 rounded-md text-xs transition-colors",
+                      statusView === opt.key
+                        ? "bg-white text-gray-800 shadow-sm"
+                        : "text-gray-500 hover:text-gray-700")}>
+                    {opt.label} <span className="text-gray-400">{opt.count}</span>
+                  </button>
+                ))}
+              </div>
+              <button onClick={() => setShowNotionPicker(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-600 text-xs rounded-lg transition-colors">
+                <RefreshCw size={12} /> Import from Notion
+              </button>
+            </div>
           </div>
 
-          {tasks.map(task => (
+          {visibleTasks.length === 0 && tasks.length > 0 && (
+            <p className="text-xs text-gray-400 px-3 py-4 text-center">
+              {statusView === "active" ? "אין משימות פעילות" : statusView === "done" ? "אין משימות שהושלמו" : "אין משימות"}
+            </p>
+          )}
+
+          {visibleTasks.map(task => (
             <div key={task.id} className="flex items-center gap-2 group/task px-3 py-2 rounded-lg hover:bg-gray-50">
               <button onClick={() => toggleTask(task)}
                 className={clsx("w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors",

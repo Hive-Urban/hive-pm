@@ -44,7 +44,7 @@ function mapStatus(s: string | null): "todo" | "in_progress" | "done" | "blocked
   if (!s) return "todo";
   const l = s.toLowerCase();
   if (l.includes("progress") || l.includes("working")) return "in_progress";
-  if (l.includes("done") || l.includes("complete")) return "done";
+  if (l.includes("done") || l.includes("complete") || l.includes("approved")) return "done";
   if (l.includes("block")) return "blocked";
   return "todo";
 }
