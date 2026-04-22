@@ -316,6 +316,10 @@ export default function GanttChart({ pillars }: Props) {
             const activeTasks = allTasks.filter(isActiveTask);
             const openTasks = allTasks; // show every task; completion shows via bar/label
             const isOpen = expanded.has(pillar.id);
+            const pillarPct = allTasks.length === 0
+              ? 0
+              : Math.round((allTasks.reduce((acc, t) => acc + taskCompletion(t), 0) / allTasks.length) * 100);
+            const pillarHex = pillar.color && pillar.color.startsWith("#") ? pillar.color : "#6366f1";
             return (
               <div key={pillar.id} className="border-b border-gray-100 last:border-0">
                 <button onClick={() => toggleExpand(pillar.id)}
@@ -323,10 +327,20 @@ export default function GanttChart({ pillars }: Props) {
                   style={{ gridTemplateColumns: `minmax(360px, 1fr) repeat(${totalWeeks}, minmax(48px, 1fr))` }}>
                   <div className="px-4 py-3 flex items-center gap-2">
                     {isOpen ? <ChevronDown size={14} className="text-gray-400" /> : <ChevronRight size={14} className="text-gray-400" />}
-                    {pillar.icon && <span className="text-base">{pillar.icon}</span>}
+                    <span
+                      className="inline-block w-3.5 h-3.5 rounded-[4px] shrink-0"
+                      style={{ backgroundColor: pillarHex }}
+                      aria-hidden
+                    />
                     <span className="text-sm font-semibold text-gray-800">{pillar.name}</span>
                     <span className="text-xs text-gray-400">· {activeTasks.length}/{allTasks.length}</span>
-                    <span className="text-[10px] text-gray-400 font-mono ml-auto">{String(idx + 1).padStart(2, "0")}</span>
+                    <div className="ml-auto flex items-center gap-2">
+                      <div className="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full transition-all" style={{ width: `${pillarPct}%`, backgroundColor: pillarHex }} />
+                      </div>
+                      <span className="text-[11px] text-gray-500 tabular-nums w-8 text-right">{pillarPct}%</span>
+                      <span className="text-[10px] text-gray-300 font-mono">{String(idx + 1).padStart(2, "0")}</span>
+                    </div>
                   </div>
                   {/* Empty cells to fill width */}
                   {Array.from({ length: totalWeeks }).map((_, i) => (
