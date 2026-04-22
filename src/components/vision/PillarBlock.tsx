@@ -190,8 +190,20 @@ export default function PillarBlock({ pillar, index, onUpdate, onDelete }: {
             </p>
           )}
 
-          {visibleTasks.map(task => (
-            <div key={task.id} className="flex items-center gap-2 group/task px-3 py-2 rounded-lg hover:bg-gray-50">
+          {visibleTasks.map(task => {
+            const openNotion = () => {
+              if (task.notion_url) window.open(task.notion_url, "_blank", "noopener,noreferrer");
+            };
+            return (
+            <div key={task.id} className="flex items-center gap-2 group/task px-3 py-2 rounded-lg hover:bg-gray-50"
+              onDoubleClick={openNotion}
+              onContextMenu={e => {
+                if (task.notion_url) {
+                  e.preventDefault();
+                  openNotion();
+                }
+              }}
+              title={task.notion_url ? "Double-click or right-click to open in Notion" : undefined}>
               <button onClick={() => toggleTask(task)}
                 className={clsx("w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors",
                   task.status === "done" ? "border-emerald-500 bg-emerald-500" : "border-gray-300 hover:border-indigo-400"
@@ -228,7 +240,8 @@ export default function PillarBlock({ pillar, index, onUpdate, onDelete }: {
                 <Trash2 size={12} />
               </button>
             </div>
-          ))}
+            );
+          })}
 
           <div className="flex gap-2 mt-2">
             <input value={newTask} onChange={e => setNewTask(e.target.value)}
