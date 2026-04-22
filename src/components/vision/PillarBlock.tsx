@@ -62,6 +62,7 @@ export default function PillarBlock({ pillar, index, onUpdate, onDelete }: {
   }
 
   const done = tasks.filter(t => t.status === "done").length;
+  const active = tasks.length - done;
   const progress = tasks.length > 0 ? Math.round((done / tasks.length) * 100) : 0;
   const hex = resolveColor(pillar.color);
 
@@ -105,7 +106,7 @@ export default function PillarBlock({ pillar, index, onUpdate, onDelete }: {
         </div>
         <div className="flex items-center gap-4 shrink-0">
           <div className="text-right">
-            <p className="text-xs text-gray-400">{done}/{tasks.length} tasks</p>
+            <p className="text-xs text-gray-400">{active}/{tasks.length} tasks</p>
             <div className="w-24 h-1.5 bg-gray-100 rounded-full mt-1">
               <div className="h-full rounded-full transition-all" style={{ width: `${progress}%`, backgroundColor: hex }} />
             </div>
@@ -203,7 +204,7 @@ export default function PillarBlock({ pillar, index, onUpdate, onDelete }: {
       </div>
 
       {showNotionPicker && (
-        <NotionTaskPicker pillarId={pillar.id} onClose={() => setShowNotionPicker(false)} onDone={reloadTasks} />
+        <NotionTaskPicker pillarId={pillar.id} pillarName={pillar.name} onClose={() => setShowNotionPicker(false)} onDone={reloadTasks} />
       )}
     </div>
   );

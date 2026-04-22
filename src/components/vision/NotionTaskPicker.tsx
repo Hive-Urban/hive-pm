@@ -46,8 +46,21 @@ const STATUS_ORDER: Record<string, number> = {
   "in progress": 3, "blocked": 4, "done": 5, "complete": 6, "approved": 7,
 };
 
-export default function NotionTaskPicker({ pillarId, onClose, onDone }: {
+const NONE_VALUE = "__NONE__";
+
+function toggleInArray(arr: string[], value: string): string[] {
+  return arr.includes(value) ? arr.filter(v => v !== value) : [...arr, value];
+}
+
+function matches(filter: string[], value: string | null): boolean {
+  if (filter.length === 0) return true;
+  if (value === null) return filter.includes(NONE_VALUE);
+  return filter.includes(value);
+}
+
+export default function NotionTaskPicker({ pillarId, pillarName, onClose, onDone }: {
   pillarId: string;
+  pillarName?: string;
   onClose: () => void;
   onDone: () => void;
 }) {
@@ -55,10 +68,10 @@ export default function NotionTaskPicker({ pillarId, onClose, onDone }: {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
-  const [typeFilter, setTypeFilter] = useState<string | null>(null);
-  const [priorityFilter, setPriorityFilter] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  const [productFilter, setProductFilter] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<string[]>([]);
+  const [priorityFilter, setPriorityFilter] = useState<string[]>([]);
+  const [statusFilter, setStatusFilter] = useState<string[]>([]);
+  const [productFilter, setProductFilter] = useState<string[]>([]);
   const [sinceDate, setSinceDate] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -76,11 +89,14 @@ export default function NotionTaskPicker({ pillarId, onClose, onDone }: {
       const raw = localStorage.getItem(`notion-filters:${pillarId}`);
       if (raw) {
         const f = JSON.parse(raw);
-        setTypeFilter(f.type ?? null);
-        setPriorityFilter(f.priority ?? null);
-        setStatusFilter(f.status ?? null);
-        setProductFilter(f.product ?? null);
-        setSinceDate(f.since ?? "");
+        const asArr = (v: unknown): string[] =>
+          Array.isArray(v) ? v.filter((x): x is string => typeof x === "string")
+            : typeof v === "string" ? [v] : [];
+        setTypeFilter(asArr(f.type));
+        setPriorityFilter(asArr(f.priority));
+        setStatusFilter(asArr(f.status));
+        setProductFilter(asArr(f.product));
+        setSinceDate(typeof f.since === "string" ? f.since : "");
       }
     } catch {
       // ignore malformed storage
@@ -102,18 +118,36 @@ export default function NotionTaskPicker({ pillarId, onClose, onDone }: {
     }
   }, [filtersHydrated, pillarId, typeFilter, priorityFilter, statusFilter, productFilter, sinceDate]);
 
+  const labelForValue = (v: string) => v === NONE_VALUE ? "None" : v;
+
   const activeFilters: { label: string; value: string; clear: () => void; style?: string }[] = [];
-  if (typeFilter) activeFilters.push({ label: "Type", value: typeFilter, clear: () => setTypeFilter(null), style: TYPE_STYLE[typeFilter.toLowerCase()] });
-  if (priorityFilter) activeFilters.push({ label: "Priority", value: priorityFilter, clear: () => setPriorityFilter(null), style: PRIORITY_STYLE[priorityFilter.toLowerCase()] });
-  if (productFilter) activeFilters.push({ label: "Product", value: productFilter, clear: () => setProductFilter(null), style: "bg-sky-900/50 text-sky-300 border-sky-700/50" });
-  if (statusFilter) activeFilters.push({ label: "Status", value: statusFilter, clear: () => setStatusFilter(null), style: STATUS_STYLE[statusFilter.toLowerCase()] });
+  typeFilter.forEach(v => activeFilters.push({
+    label: "Type", value: labelForValue(v),
+    clear: () => setTypeFilter(prev => prev.filter(x => x !== v)),
+    style: v === NONE_VALUE ? undefined : TYPE_STYLE[v.toLowerCase()],
+  }));
+  priorityFilter.forEach(v => activeFilters.push({
+    label: "Priority", value: labelForValue(v),
+    clear: () => setPriorityFilter(prev => prev.filter(x => x !== v)),
+    style: v === NONE_VALUE ? undefined : PRIORITY_STYLE[v.toLowerCase()],
+  }));
+  productFilter.forEach(v => activeFilters.push({
+    label: "Product", value: labelForValue(v),
+    clear: () => setProductFilter(prev => prev.filter(x => x !== v)),
+    style: v === NONE_VALUE ? undefined : "bg-sky-900/50 text-sky-300 border-sky-700/50",
+  }));
+  statusFilter.forEach(v => activeFilters.push({
+    label: "Status", value: labelForValue(v),
+    clear: () => setStatusFilter(prev => prev.filter(x => x !== v)),
+    style: v === NONE_VALUE ? undefined : STATUS_STYLE[v.toLowerCase()],
+  }));
   if (sinceDate) activeFilters.push({ label: "Since", value: sinceDate, clear: () => setSinceDate("") });
 
   function clearAllFilters() {
-    setTypeFilter(null);
-    setPriorityFilter(null);
-    setStatusFilter(null);
-    setProductFilter(null);
+    setTypeFilter([]);
+    setPriorityFilter([]);
+    setStatusFilter([]);
+    setProductFilter([]);
     setSinceDate("");
   }
 
@@ -125,12 +159,17 @@ export default function NotionTaskPicker({ pillarId, onClose, onDone }: {
   const products = (Array.from(new Set(tasks.map(t => t.product).filter(Boolean))) as string[])
     .sort((a, b) => a.localeCompare(b));
 
+  const hasTypeNone = tasks.some(t => !t.type);
+  const hasPriorityNone = tasks.some(t => !t.priority);
+  const hasStatusNone = tasks.some(t => !t.status);
+  const hasProductNone = tasks.some(t => !t.product);
+
   const filtered = tasks.filter(t => {
     const matchSearch = t.name.toLowerCase().includes(search.toLowerCase());
-    const matchType = !typeFilter || t.type === typeFilter;
-    const matchPriority = !priorityFilter || t.priority === priorityFilter;
-    const matchStatus = !statusFilter || t.status === statusFilter;
-    const matchProduct = !productFilter || t.product === productFilter;
+    const matchType = matches(typeFilter, t.type);
+    const matchPriority = matches(priorityFilter, t.priority);
+    const matchStatus = matches(statusFilter, t.status);
+    const matchProduct = matches(productFilter, t.product);
     const matchDate = !sinceDate || (t as any).created_at >= sinceDate;
     return matchSearch && matchType && matchPriority && matchStatus && matchProduct && matchDate;
   });
@@ -161,7 +200,9 @@ export default function NotionTaskPicker({ pillarId, onClose, onDone }: {
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
           <div>
-            <h2 className="text-white font-semibold">Import from Notion</h2>
+            <h2 className="text-white font-semibold">
+              {pillarName ? `${pillarName}: ` : ""}Import from Notion
+            </h2>
             <p className="text-xs text-gray-400 mt-0.5">{selected.size} selected</p>
           </div>
           <button onClick={onClose} className="p-1.5 hover:bg-gray-800 rounded-lg text-gray-400"><X size={16} /></button>
@@ -213,78 +254,106 @@ export default function NotionTaskPicker({ pillarId, onClose, onDone }: {
           {/* Type filter */}
           <div className="flex gap-2 flex-wrap items-center">
             <span className="text-xs text-gray-600">Type:</span>
-            <button onClick={() => setTypeFilter(null)}
+            <button onClick={() => setTypeFilter([])}
               className={clsx("px-2.5 py-1 rounded-full text-xs border transition-colors",
-                !typeFilter ? "bg-indigo-600 text-white border-indigo-500" : "border-gray-700 text-gray-400 hover:border-gray-500")}>
+                typeFilter.length === 0 ? "bg-indigo-600 text-white border-indigo-500" : "border-gray-700 text-gray-400 hover:border-gray-500")}>
               All
             </button>
             {types.map(t => (
-              <button key={t} onClick={() => setTypeFilter(typeFilter === t ? null : t)}
+              <button key={t} onClick={() => setTypeFilter(prev => toggleInArray(prev, t))}
                 className={clsx("px-2.5 py-1 rounded-full text-xs border transition-colors capitalize",
-                  typeFilter === t ? "bg-indigo-600 text-white border-indigo-500"
+                  typeFilter.includes(t) ? "bg-indigo-600 text-white border-indigo-500"
                     : (TYPE_STYLE[t.toLowerCase()] ?? "border-gray-700 text-gray-400"))}>
                 {t}
               </button>
             ))}
+            {hasTypeNone && (
+              <button onClick={() => setTypeFilter(prev => toggleInArray(prev, NONE_VALUE))}
+                className={clsx("px-2.5 py-1 rounded-full text-xs border transition-colors italic",
+                  typeFilter.includes(NONE_VALUE) ? "bg-indigo-600 text-white border-indigo-500" : "border-dashed border-gray-700 text-gray-500 hover:border-gray-500")}>
+                None
+              </button>
+            )}
           </div>
 
           {/* Priority filter */}
-          {priorities.length > 0 && (
+          {(priorities.length > 0 || hasPriorityNone) && (
             <div className="flex gap-2 flex-wrap items-center">
               <span className="text-xs text-gray-600">Priority:</span>
-              <button onClick={() => setPriorityFilter(null)}
+              <button onClick={() => setPriorityFilter([])}
                 className={clsx("px-2.5 py-1 rounded-full text-xs border transition-colors",
-                  !priorityFilter ? "bg-indigo-600 text-white border-indigo-500" : "border-gray-700 text-gray-400 hover:border-gray-500")}>
+                  priorityFilter.length === 0 ? "bg-indigo-600 text-white border-indigo-500" : "border-gray-700 text-gray-400 hover:border-gray-500")}>
                 All
               </button>
               {priorities.map(p => (
-                <button key={p} onClick={() => setPriorityFilter(priorityFilter === p ? null : p)}
+                <button key={p} onClick={() => setPriorityFilter(prev => toggleInArray(prev, p))}
                   className={clsx("px-2.5 py-1 rounded-full text-xs border transition-colors capitalize",
-                    priorityFilter === p ? "bg-indigo-600 text-white border-indigo-500"
+                    priorityFilter.includes(p) ? "bg-indigo-600 text-white border-indigo-500"
                       : (PRIORITY_STYLE[p.toLowerCase()] ?? "border-gray-700 text-gray-400"))}>
                   {p}
                 </button>
               ))}
+              {hasPriorityNone && (
+                <button onClick={() => setPriorityFilter(prev => toggleInArray(prev, NONE_VALUE))}
+                  className={clsx("px-2.5 py-1 rounded-full text-xs border transition-colors italic",
+                    priorityFilter.includes(NONE_VALUE) ? "bg-indigo-600 text-white border-indigo-500" : "border-dashed border-gray-700 text-gray-500 hover:border-gray-500")}>
+                  None
+                </button>
+              )}
             </div>
           )}
 
           {/* Product filter */}
-          {products.length > 0 && (
+          {(products.length > 0 || hasProductNone) && (
             <div className="flex gap-2 flex-wrap items-center">
               <span className="text-xs text-gray-600">Product:</span>
-              <button onClick={() => setProductFilter(null)}
+              <button onClick={() => setProductFilter([])}
                 className={clsx("px-2.5 py-1 rounded-full text-xs border transition-colors",
-                  !productFilter ? "bg-indigo-600 text-white border-indigo-500" : "border-gray-700 text-gray-400 hover:border-gray-500")}>
+                  productFilter.length === 0 ? "bg-indigo-600 text-white border-indigo-500" : "border-gray-700 text-gray-400 hover:border-gray-500")}>
                 All
               </button>
               {products.map(p => (
-                <button key={p} onClick={() => setProductFilter(productFilter === p ? null : p)}
+                <button key={p} onClick={() => setProductFilter(prev => toggleInArray(prev, p))}
                   className={clsx("px-2.5 py-1 rounded-full text-xs border transition-colors",
-                    productFilter === p ? "bg-indigo-600 text-white border-indigo-500"
+                    productFilter.includes(p) ? "bg-indigo-600 text-white border-indigo-500"
                       : "bg-sky-900/50 text-sky-300 border-sky-700/50 hover:border-sky-500")}>
                   {p}
                 </button>
               ))}
+              {hasProductNone && (
+                <button onClick={() => setProductFilter(prev => toggleInArray(prev, NONE_VALUE))}
+                  className={clsx("px-2.5 py-1 rounded-full text-xs border transition-colors italic",
+                    productFilter.includes(NONE_VALUE) ? "bg-indigo-600 text-white border-indigo-500" : "border-dashed border-gray-700 text-gray-500 hover:border-gray-500")}>
+                  None
+                </button>
+              )}
             </div>
           )}
 
           {/* Status filter */}
-          {statuses.length > 0 && (
+          {(statuses.length > 0 || hasStatusNone) && (
             <div className="flex gap-2 flex-wrap items-center">
               <span className="text-xs text-gray-600">Status:</span>
-              <button onClick={() => setStatusFilter(null)}
+              <button onClick={() => setStatusFilter([])}
                 className={clsx("px-2.5 py-1 rounded-full text-xs border transition-colors",
-                  !statusFilter ? "bg-indigo-600 text-white border-indigo-500" : "border-gray-700 text-gray-400 hover:border-gray-500")}>
+                  statusFilter.length === 0 ? "bg-indigo-600 text-white border-indigo-500" : "border-gray-700 text-gray-400 hover:border-gray-500")}>
                 All
               </button>
               {statuses.map(s => (
-                <button key={s} onClick={() => setStatusFilter(statusFilter === s ? null : s)}
+                <button key={s} onClick={() => setStatusFilter(prev => toggleInArray(prev, s))}
                   className={clsx("px-2.5 py-1 rounded-full text-xs border transition-colors capitalize",
-                    statusFilter === s ? "bg-indigo-600 text-white border-indigo-500"
+                    statusFilter.includes(s) ? "bg-indigo-600 text-white border-indigo-500"
                       : (STATUS_STYLE[s.toLowerCase()] ?? "border-gray-700 text-gray-400"))}>
                   {s}
                 </button>
               ))}
+              {hasStatusNone && (
+                <button onClick={() => setStatusFilter(prev => toggleInArray(prev, NONE_VALUE))}
+                  className={clsx("px-2.5 py-1 rounded-full text-xs border transition-colors italic",
+                    statusFilter.includes(NONE_VALUE) ? "bg-indigo-600 text-white border-indigo-500" : "border-dashed border-gray-700 text-gray-500 hover:border-gray-500")}>
+                  None
+                </button>
+              )}
             </div>
           )}
 
