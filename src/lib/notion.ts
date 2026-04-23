@@ -46,14 +46,25 @@ export async function fetchNotionTasks(filter?: {
     filters.push({ property: "Sprint", select: { equals: filter.sprint } });
   }
 
-  const response = await notion.databases.query({
-    database_id: DATABASE_ID,
-    filter: filters.length > 0 ? { and: filters } : undefined,
-    page_size: 100,
-    sorts: [{ property: "ID", direction: "descending" }],
-  });
+  // Paginate through the entire Notion DB (cap at ~2000 to stay safe)
+  const MAX_PAGES = 20;
+  const PAGE_SIZE = 100;
+  const results: any[] = [];
+  let cursor: string | undefined;
+  for (let i = 0; i < MAX_PAGES; i++) {
+    const response = await notion.databases.query({
+      database_id: DATABASE_ID,
+      filter: filters.length > 0 ? { and: filters } : undefined,
+      page_size: PAGE_SIZE,
+      start_cursor: cursor,
+      sorts: [{ property: "ID", direction: "descending" }],
+    });
+    results.push(...response.results);
+    if (!response.has_more || !response.next_cursor) break;
+    cursor = response.next_cursor;
+  }
 
-  return response.results
+  return results
     .filter((page: any) => page.object === "page")
     .map((page: any) => {
       const props = page.properties;

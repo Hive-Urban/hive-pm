@@ -7,6 +7,7 @@ type NotionTask = {
   id: string; name: string; type: string | null;
   status: string | null; priority: string | null; product: string | null;
   sprint: string | null; assignee: string | null; page_url: string;
+  notion_id?: number | null;
   created_at?: string;
 };
 
@@ -164,8 +165,20 @@ export default function NotionTaskPicker({ pillarId, pillarName, onClose, onDone
   const hasStatusNone = tasks.some(t => !t.status);
   const hasProductNone = tasks.some(t => !t.product);
 
+  const searchTrimmed = search.trim();
+  const idQuery = (() => {
+    const cleaned = searchTrimmed.replace(/^#/, "").trim();
+    if (cleaned === "" || !/^\d+$/.test(cleaned)) return null;
+    return cleaned;
+  })();
+
   const filtered = tasks.filter(t => {
-    const matchSearch = t.name.toLowerCase().includes(search.toLowerCase());
+    let matchSearch = true;
+    if (searchTrimmed.length > 0) {
+      const byText = t.name.toLowerCase().includes(searchTrimmed.toLowerCase());
+      const byId = idQuery !== null && t.notion_id != null && String(t.notion_id).includes(idQuery);
+      matchSearch = byText || byId;
+    }
     const matchType = matches(typeFilter, t.type);
     const matchPriority = matches(priorityFilter, t.priority);
     const matchStatus = matches(statusFilter, t.status);
@@ -213,7 +226,7 @@ export default function NotionTaskPicker({ pillarId, pillarName, onClose, onDone
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
             <input value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search tasks..." autoFocus
+              placeholder="Search by title or #ID…" autoFocus
               className="w-full bg-gray-800 border border-gray-700 rounded-lg pl-8 pr-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500" />
           </div>
 
@@ -405,7 +418,12 @@ export default function NotionTaskPicker({ pillarId, pillarName, onClose, onDone
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-200 leading-snug">{task.name}</p>
+                  <p className="text-sm text-gray-200 leading-snug">
+                    {task.notion_id != null && (
+                      <span className="text-[10px] font-mono text-gray-500 mr-1.5 align-middle">#{task.notion_id}</span>
+                    )}
+                    {task.name}
+                  </p>
                   <div className="flex items-center gap-2 mt-1 flex-wrap">
                     {task.type && (
                       <span className={clsx("text-xs px-1.5 py-0.5 rounded border capitalize",
