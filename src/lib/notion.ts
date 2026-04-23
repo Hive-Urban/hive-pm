@@ -20,7 +20,10 @@ function extractMultiSelect(prop: any): string[] {
 }
 
 function extractNumber(prop: any): number | null {
-  return prop?.number ?? null;
+  if (!prop) return null;
+  if (prop.type === "unique_id") return prop.unique_id?.number ?? null;
+  if (prop.type === "formula" && prop.formula?.type === "number") return prop.formula.number ?? null;
+  return prop.number ?? null;
 }
 
 function extractDate(prop: any): string | null {
