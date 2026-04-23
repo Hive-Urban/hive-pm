@@ -173,12 +173,12 @@ export default function NotionTaskPicker({ pillarId, pillarName, onClose, onDone
   })();
 
   const filtered = tasks.filter(t => {
-    let matchSearch = true;
-    if (searchTrimmed.length > 0) {
-      const byText = t.name.toLowerCase().includes(searchTrimmed.toLowerCase());
-      const byId = idQuery !== null && t.notion_id != null && String(t.notion_id).includes(idQuery);
-      matchSearch = byText || byId;
+    // ID search bypasses every other filter — you know exactly which task you want
+    if (idQuery !== null) {
+      return t.notion_id != null && String(t.notion_id).includes(idQuery);
     }
+    const matchSearch = searchTrimmed.length === 0
+      || t.name.toLowerCase().includes(searchTrimmed.toLowerCase());
     const matchType = matches(typeFilter, t.type);
     const matchPriority = matches(priorityFilter, t.priority);
     const matchStatus = matches(statusFilter, t.status);
