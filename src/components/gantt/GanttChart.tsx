@@ -405,11 +405,13 @@ function TaskRow({ task, sprints, totalWeeks, pillarColor }: {
       title={task.notion_url ? "Double/right click to open in Notion" : undefined}
     >
       <div className="px-4 py-2.5 pl-10 flex items-center gap-2 min-w-0">
-        <span
-          className={clsx("text-sm truncate flex-1", isComplete ? "text-gray-400 line-through" : "text-gray-700")}
-          title={task.title}
-        >
-          {task.title}
+        <span className="relative group/title flex-1 min-w-0">
+          <span className={clsx("block text-sm truncate", isComplete ? "text-gray-400 line-through" : "text-gray-700")}>
+            {task.title}
+          </span>
+          <span className="pointer-events-none absolute top-full left-0 mt-1 z-30 hidden group-hover/title:block max-w-md whitespace-normal break-words rounded-lg bg-gray-900 text-white text-xs px-3 py-2 shadow-lg leading-snug">
+            {task.title}
+          </span>
         </span>
         {tag && (
           <span className="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500 capitalize shrink-0">
