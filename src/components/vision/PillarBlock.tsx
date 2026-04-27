@@ -194,6 +194,8 @@ export default function PillarBlock({ pillar, index, onUpdate, onDelete }: {
             const openNotion = () => {
               if (task.notion_url) window.open(task.notion_url, "_blank", "noopener,noreferrer");
             };
+            const notionId = task.tags?.find(t => t.startsWith("notion-id:"))?.slice("notion-id:".length);
+            const typeTag = task.tags?.find(t => !t.includes(":"));
             return (
             <div key={task.id} className="flex items-center gap-2 group/task px-3 py-2 rounded-lg hover:bg-gray-50"
               onDoubleClick={openNotion}
@@ -210,6 +212,9 @@ export default function PillarBlock({ pillar, index, onUpdate, onDelete }: {
                 )}>
                 {task.status === "done" && <Check size={11} className="text-white" />}
               </button>
+              {notionId && (
+                <span className="text-[10px] font-mono text-gray-400 shrink-0 tabular-nums">#{notionId}</span>
+              )}
               <span className={clsx("flex-1 text-sm", task.status === "done" ? "line-through text-gray-400" : "text-gray-700")}>
                 {task.title}
               </span>
@@ -226,9 +231,9 @@ export default function PillarBlock({ pillar, index, onUpdate, onDelete }: {
                 </span>
               )}
               {/* Type badge */}
-              {task.tags?.[0] && (
-                <span className={clsx("text-xs px-1.5 py-0.5 rounded capitalize", TYPE_STYLE[task.tags[0].toLowerCase()] ?? "bg-gray-100 text-gray-500")}>
-                  {task.tags[0]}
+              {typeTag && (
+                <span className={clsx("text-xs px-1.5 py-0.5 rounded capitalize", TYPE_STYLE[typeTag.toLowerCase()] ?? "bg-gray-100 text-gray-500")}>
+                  {typeTag}
                 </span>
               )}
               <span className={clsx("text-xs px-1.5 py-0.5 rounded", STATUS_COLOR[task.status])}>

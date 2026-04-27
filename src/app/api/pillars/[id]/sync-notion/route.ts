@@ -29,6 +29,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
         const tags: string[] = [];
         if (t.type) tags.push(t.type);
         if (t.status && t.status.toLowerCase().includes("approved")) tags.push("notion:approved");
+        if (t.notion_id != null) tags.push(`notion-id:${t.notion_id}`);
         return {
           pillar_id: id,
           title: t.name,
