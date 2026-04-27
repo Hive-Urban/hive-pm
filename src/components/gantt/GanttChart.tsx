@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
-import { ChevronRight, ChevronDown, ChevronUp, Plus, Minus, ExternalLink } from "lucide-react";
+import { ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Plus, Minus, ExternalLink } from "lucide-react";
 import clsx from "clsx";
 
 type Task = {
@@ -278,19 +278,20 @@ export default function GanttChart({ pillars }: Props) {
       ) : (
         <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
           {/* Toolbar: collapse/expand all pillars */}
-          <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 bg-white">
-            <span className="text-xs text-gray-500">{pillars.length} פילרים</span>
+          <div className="flex items-center px-4 py-2 border-b border-gray-100 bg-white">
             {(() => {
               const allOpen = pillars.length > 0 && pillars.every(p => expanded.has(p.id));
+              const Icon = allOpen ? ChevronsDownUp : ChevronsUpDown;
               return (
                 <button
                   onClick={() =>
                     setExpanded(allOpen ? new Set() : new Set(pillars.map(p => p.id)))
                   }
-                  className="flex items-center gap-1.5 text-xs text-gray-600 hover:text-gray-900 px-2.5 py-1 rounded-md hover:bg-gray-50 transition-colors">
-                  {allOpen
-                    ? (<><ChevronUp size={13} /> סגור הכל</>)
-                    : (<><ChevronDown size={13} /> פתח הכל</>)}
+                  disabled={pillars.length === 0}
+                  className="group flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 px-2 py-1 -mx-1 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
+                  title={allOpen ? "סגור הכל" : "פתח הכל"}>
+                  <Icon size={14} className="text-gray-400 group-hover:text-gray-700 transition-colors" />
+                  <span>{pillars.length} פילרים</span>
                 </button>
               );
             })()}
