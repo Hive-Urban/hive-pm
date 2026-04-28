@@ -218,12 +218,91 @@ export default function GanttChart({ pillars }: Props) {
 
   const totalWeeks = shownSprints.length * 2;
 
+  const currentSprint = useMemo(() => {
+    const today = new Date();
+    return allSprints.find(s => today >= s.start && today < s.end) ?? allSprints[0] ?? null;
+  }, [allSprints]);
+
+  // Build a virtual "Others" pillar from Notion completions during the active sprint
+  // window (sprint.start - 2d .. now), only for tasks not yet assigned to a pillar.
+  const [othersPillar, setOthersPillar] = useState<Pillar | null>(null);
+
+  useEffect(() => {
+    if (!currentSprint) return;
+    let cancelled = false;
+    const assigned = new Set<string>();
+    for (const p of pillars) {
+      for (const t of p.tasks ?? []) {
+        const pageId = (t as Task & { notion_page_id?: string | null }).notion_page_id;
+        if (pageId) assigned.add(pageId);
+      }
+    }
+    fetch("/api/notion/tasks?includeAssigned=true")
+      .then(r => r.json())
+      .then(data => {
+        if (cancelled) return;
+        const tasks: Array<{
+          id: string; name: string; status: string | null; product: string | null;
+          page_url: string; type: string | null; due_date: string | null;
+          created_at?: string | null; notion_id?: number | null;
+        }> = data.tasks ?? [];
+        const windowStart = addDays(currentSprint.start, -2);
+        const today = new Date();
+        const filtered = tasks.filter(t => {
+          if (assigned.has(t.id)) return false;
+          const s = (t.status ?? "").toLowerCase();
+          const isDone = s === "done" || s === "complete" || s === "approved";
+          if (!isDone) return false;
+          if (!t.created_at) return false;
+          const created = new Date(t.created_at);
+          if (Number.isNaN(created.getTime())) return false;
+          return created >= windowStart && created <= today;
+        });
+        if (filtered.length === 0) { setOthersPillar(null); return; }
+        const synthesized: Task[] = filtered.map(t => {
+          const tags: string[] = [];
+          if (t.type) tags.push(t.type);
+          if ((t.status ?? "").toLowerCase() === "approved") tags.push("notion:approved");
+          return {
+            id: `others:${t.id}`,
+            title: t.name,
+            status: "done",
+            source: "notion",
+            notion_url: t.page_url,
+            product: t.product,
+            tags,
+            due_date: currentSprint.end.toISOString(),
+            created_at: t.created_at ?? null,
+          };
+        });
+        setOthersPillar({
+          id: "__others__",
+          name: "Others",
+          color: "#9ca3af",
+          icon: null,
+          tasks: synthesized,
+        });
+        setExpanded(prev => {
+          const next = new Set(prev);
+          next.add("__others__");
+          return next;
+        });
+      })
+      .catch(() => { /* swallow */ });
+    return () => { cancelled = true; };
+  }, [currentSprint, pillars]);
+
+  const allPillars = useMemo<Pillar[]>(
+    () => othersPillar ? [...pillars, othersPillar] : pillars,
+    [pillars, othersPillar]
+  );
+
   // Completion % per sprint (across all pillars' tasks that belong to that sprint)
   const sprintCompletion = useMemo(() => {
     const map = new Map<number, number>();
     for (const s of allSprints) {
       const tasksInSprint: Task[] = [];
-      for (const p of pillars) {
+      for (const p of allPillars) {
         for (const t of p.tasks ?? []) {
           if (sprintForTask(t, allSprints)?.index === s.index) tasksInSprint.push(t);
         }
@@ -236,7 +315,7 @@ export default function GanttChart({ pillars }: Props) {
       }
     }
     return map;
-  }, [allSprints, pillars]);
+  }, [allSprints, allPillars]);
 
   function toggleSprint(idx: number) {
     setVisibleSprints(prev => {
@@ -320,18 +399,18 @@ export default function GanttChart({ pillars }: Props) {
           {/* Toolbar: collapse/expand all pillars */}
           <div className="flex items-center px-4 py-2 border-b border-gray-100 bg-white">
             {(() => {
-              const allOpen = pillars.length > 0 && pillars.every(p => expanded.has(p.id));
+              const allOpen = allPillars.length > 0 && allPillars.every(p => expanded.has(p.id));
               const Icon = allOpen ? ChevronsDownUp : ChevronsUpDown;
               return (
                 <button
                   onClick={() =>
-                    setExpanded(allOpen ? new Set() : new Set(pillars.map(p => p.id)))
+                    setExpanded(allOpen ? new Set() : new Set(allPillars.map(p => p.id)))
                   }
-                  disabled={pillars.length === 0}
+                  disabled={allPillars.length === 0}
                   className="group flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 px-2 py-1 -mx-1 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
                   title={allOpen ? "סגור הכל" : "פתח הכל"}>
                   <Icon size={14} className="text-gray-400 group-hover:text-gray-700 transition-colors" />
-                  <span>{pillars.length} פילרים</span>
+                  <span>{allPillars.length} פילרים</span>
                 </button>
               );
             })()}
@@ -375,10 +454,10 @@ export default function GanttChart({ pillars }: Props) {
           </div>
 
           {/* Pillar rows */}
-          {pillars.length === 0 && (
+          {allPillars.length === 0 && (
             <div className="px-6 py-12 text-center text-gray-400">אין פילרים להצגה</div>
           )}
-          {pillars.map((pillar, idx) => {
+          {allPillars.map((pillar, idx) => {
             const allTasks = pillar.tasks ?? [];
             const activeTasks = allTasks.filter(isActiveTask);
             const openTasks = allTasks; // show every task; completion shows via bar/label
@@ -399,7 +478,12 @@ export default function GanttChart({ pillars }: Props) {
                       style={{ backgroundColor: pillarHex }}
                       aria-hidden
                     />
-                    <span className="text-sm font-semibold text-gray-800">{pillar.name}</span>
+                    <span className={clsx("text-sm font-semibold", pillar.id === "__others__" ? "text-gray-500 italic" : "text-gray-800")}>
+                      {pillar.name}
+                    </span>
+                    {pillar.id === "__others__" && (
+                      <span className="text-[10px] text-gray-400">משימות שהושלמו בספרינט הנוכחי וטרם שויכו</span>
+                    )}
                     <span className="text-xs text-gray-400">· {activeTasks.length}/{allTasks.length}</span>
                     <div className="ml-auto flex items-center gap-2">
                       <div className="w-24 h-1.5 bg-gray-100 rounded-full overflow-hidden">
