@@ -14,25 +14,7 @@ type Task = {
   product?: string | null;
 };
 
-// Module-level cache so multiple pillars share one Notion lookup
-let notionIdCache: { map: Record<string, number>; at: number } | null = null;
-const ID_CACHE_TTL_MS = 60_000;
-
-async function loadNotionIdMap(): Promise<Record<string, number>> {
-  if (notionIdCache && Date.now() - notionIdCache.at < ID_CACHE_TTL_MS) {
-    return notionIdCache.map;
-  }
-  try {
-    const res = await fetch("/api/notion/id-map");
-    if (!res.ok) return {};
-    const data = await res.json();
-    const map: Record<string, number> = data.map ?? {};
-    notionIdCache = { map, at: Date.now() };
-    return map;
-  } catch {
-    return {};
-  }
-}
+import { loadNotionIdMap } from "@/lib/notion-id-map";
 
 type Pillar = {
   id: string; name: string; color?: string; icon?: string;

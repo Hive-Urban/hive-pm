@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Plus, Minus, ExternalLink } from "lucide-react";
 import clsx from "clsx";
+import { loadNotionIdMap } from "@/lib/notion-id-map";
 
 type Task = {
   id: string;
@@ -9,6 +10,7 @@ type Task = {
   status: "todo" | "in_progress" | "done" | "blocked";
   source: "manual" | "notion";
   notion_url?: string | null;
+  notion_page_id?: string | null;
   product?: string | null;
   tags?: string[] | null;
   due_date?: string | null;
@@ -158,6 +160,13 @@ export default function GanttChart({ pillars }: Props) {
   const [visibleSprints, setVisibleSprints] = useState<Set<number>>(new Set());
   const [labelWidth, setLabelWidth] = useState<number>(LABEL_WIDTH_DEFAULT);
   const [normalized, setNormalized] = useState<boolean>(false);
+  const [notionIdMap, setNotionIdMap] = useState<Record<string, number>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    loadNotionIdMap().then(map => { if (!cancelled) setNotionIdMap(map); });
+    return () => { cancelled = true; };
+  }, []);
 
   // Load sprint count + label width + saved drawer state — mount-only.
   // Drawers default CLOSED; whatever the user opens persists per browser.
@@ -546,7 +555,7 @@ export default function GanttChart({ pillars }: Props) {
 
                 {isOpen && openTasks.length > 0 && (
                   <div>
-                    {openTasks.map(task => <TaskRow key={task.id} task={task} sprints={shownSprints} totalWeeks={totalWeeks} labelWidth={labelWidth} pillarColor={pillar.color} />)}
+                    {openTasks.map(task => <TaskRow key={task.id} task={task} sprints={shownSprints} totalWeeks={totalWeeks} labelWidth={labelWidth} pillarColor={pillar.color} notionIdMap={notionIdMap} />)}
                   </div>
                 )}
                 {isOpen && openTasks.length === 0 && (
@@ -561,13 +570,15 @@ export default function GanttChart({ pillars }: Props) {
   );
 }
 
-function TaskRow({ task, sprints, totalWeeks, labelWidth, pillarColor }: {
+function TaskRow({ task, sprints, totalWeeks, labelWidth, pillarColor, notionIdMap }: {
   task: Task;
   sprints: Sprint[];
   totalWeeks: number;
   labelWidth: number;
   pillarColor?: string;
+  notionIdMap: Record<string, number>;
 }) {
+  const notionId = task.notion_page_id ? notionIdMap[task.notion_page_id] : undefined;
   const targetSprint = sprintForTask(task, sprints);
   const created = toDate(task.created_at ?? null);
   const due = toDate(task.due_date ?? null);
@@ -602,6 +613,9 @@ function TaskRow({ task, sprints, totalWeeks, labelWidth, pillarColor }: {
       title={task.notion_url ? "Double/right click to open in Notion" : undefined}
     >
       <div className="px-4 py-2.5 pl-10 flex items-center gap-2 min-w-0">
+        {notionId != null && (
+          <span className="text-[10px] font-mono text-gray-400 shrink-0 tabular-nums">#{notionId}</span>
+        )}
         <span className="relative group/title flex-1 min-w-0">
           <span className={clsx("block text-sm truncate", isComplete ? "text-gray-400 line-through" : "text-gray-700")}>
             {task.title}
