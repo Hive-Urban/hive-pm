@@ -655,16 +655,37 @@ export default function GanttChart({ pillars }: Props) {
                             const sIdx = explicitSprintIndex(t.tags ?? null);
                             const isCleared = isSprintCleared(t.tags ?? null);
                             const where = isCleared ? "Cleared" : (sIdx ? `Sprint ${sIdx}` : "—");
+                            const tState = taskState(t);
+                            const tPct = Math.round(taskCompletion(t) * 100);
+                            const tTag = t.tags?.find(tag => !tag.includes(":"));
+                            const tDue = toDate(t.due_date ?? null);
                             return (
                               <button key={t.id}
                                 onClick={() => setTaskSprint(t.id, targetSprintIdx)}
-                                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-gray-700 hover:bg-white border border-transparent hover:border-gray-200 transition-colors text-right">
+                                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-gray-700 hover:bg-white border border-transparent hover:border-gray-200 transition-colors text-right group/cand">
                                 {tNotionId != null && (
                                   <span className="text-[10px] font-mono text-gray-400 tabular-nums shrink-0 w-10 text-left">#{tNotionId}</span>
                                 )}
                                 <span className="flex-1 truncate">{t.title}</span>
+                                {tTag && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500 capitalize shrink-0">
+                                    {tTag}
+                                  </span>
+                                )}
+                                {t.product && (
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200 shrink-0">
+                                    {t.product}
+                                  </span>
+                                )}
+                                <span className={clsx("text-[10px] px-1.5 py-0.5 rounded border shrink-0", STATUS_STYLE[tState] ?? STATUS_STYLE.todo)}>
+                                  {STATUS_LABEL[tState] ?? tState}
+                                </span>
+                                <span className="text-[10px] text-gray-500 tabular-nums shrink-0">{tPct}%</span>
+                                {tDue && (
+                                  <span className="text-[10px] text-gray-500 tabular-nums shrink-0">📅 {formatLong(tDue)}</span>
+                                )}
                                 <span className="text-[10px] text-gray-400 shrink-0">{where}</span>
-                                <Plus size={11} className="text-indigo-500 shrink-0" />
+                                <Plus size={11} className="text-indigo-500 shrink-0 opacity-50 group-hover/cand:opacity-100" />
                               </button>
                             );
                           })}
