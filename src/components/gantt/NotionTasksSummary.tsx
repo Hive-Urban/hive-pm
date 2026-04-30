@@ -157,12 +157,30 @@ export default function NotionTasksSummary({ pillars }: Props) {
 
   useEffect(() => {
     let cancelled = false;
+    // Don't refetch on every page mount; reuse the cached payload from
+    // the previous visit so navigating between pages stays free of
+    // Notion API calls. Refresh Data clears this and triggers a fresh
+    // fetch on the next remount.
+    try {
+      const cached = localStorage.getItem("notion:tasks-cache");
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed?.tasks) {
+          setTasks(parsed.tasks);
+          return () => { cancelled = true; };
+        }
+      }
+    } catch { /* noop */ }
+
     fetch("/api/notion/tasks?includeAssigned=true")
       .then(r => r.json())
       .then(data => {
         if (cancelled) return;
         if (data.error) setError(data.error);
-        else setTasks(data.tasks ?? []);
+        else {
+          setTasks(data.tasks ?? []);
+          try { localStorage.setItem("notion:tasks-cache", JSON.stringify({ tasks: data.tasks ?? [] })); } catch { /* noop */ }
+        }
       })
       .catch(err => { if (!cancelled) setError(String(err?.message ?? err)); });
     return () => { cancelled = true; };

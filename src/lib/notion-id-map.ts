@@ -7,23 +7,58 @@ export type NotionMeta = {
   priorities: Record<string, string>;
 };
 
-let cached: { meta: NotionMeta; at: number } | null = null;
-const TTL_MS = 60_000;
+const STORAGE_KEY = "notion:meta-cache";
+let memCached: NotionMeta | null = null;
 
+function readFromStorage(): NotionMeta | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object") {
+      return {
+        ids: parsed.ids ?? {},
+        priorities: parsed.priorities ?? {},
+      };
+    }
+  } catch { /* noop */ }
+  return null;
+}
+
+function writeToStorage(meta: NotionMeta) {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(meta)); } catch { /* noop */ }
+}
+
+// Returns cached data if available — never auto-refetches. The user
+// triggers a refresh explicitly via the Refresh Data button (which calls
+// refreshNotionMeta()). On absolute first load (no cache yet), we do
+// fetch once so the UI has something to show.
 async function loadNotionMeta(): Promise<NotionMeta> {
-  if (cached && Date.now() - cached.at < TTL_MS) return cached.meta;
+  if (memCached) return memCached;
+  const stored = readFromStorage();
+  if (stored) {
+    memCached = stored;
+    return stored;
+  }
+  return refreshNotionMeta();
+}
+
+export async function refreshNotionMeta(): Promise<NotionMeta> {
   try {
     const res = await fetch("/api/notion/id-map");
-    if (!res.ok) return { ids: {}, priorities: {} };
+    if (!res.ok) return memCached ?? { ids: {}, priorities: {} };
     const data = await res.json();
     const meta: NotionMeta = {
       ids: data.map ?? {},
       priorities: data.priorities ?? {},
     };
-    cached = { meta, at: Date.now() };
+    memCached = meta;
+    writeToStorage(meta);
     return meta;
   } catch {
-    return { ids: {}, priorities: {} };
+    return memCached ?? { ids: {}, priorities: {} };
   }
 }
 

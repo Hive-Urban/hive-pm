@@ -20,6 +20,11 @@ export default function RefreshDataButton() {
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setUpdated(typeof data?.updated === "number" ? data.updated : null);
+      // Bust client-side Notion caches so subsequent renders refetch
+      try {
+        localStorage.removeItem("notion:meta-cache");
+        localStorage.removeItem("notion:tasks-cache");
+      } catch { /* noop */ }
       setState("ok");
       router.refresh();
       setTimeout(() => setState("idle"), 2200);

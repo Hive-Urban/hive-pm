@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Compass, Package, BarChart2, Settings } from "lucide-react";
+import { LayoutDashboard, Compass, Package, BarChart2, Settings, BookOpen } from "lucide-react";
 import clsx from "clsx";
 
 const nav = [
@@ -9,6 +9,7 @@ const nav = [
   { href: "/vision",   label: "Vision",      icon: Compass },
   { href: "/products", label: "Products",    icon: Package },
   { href: "/gantt",    label: "Gantt",       icon: BarChart2 },
+  { href: "/help",     label: "User Guide",  icon: BookOpen },
   { href: "/settings", label: "Settings",    icon: Settings },
 ];
 
