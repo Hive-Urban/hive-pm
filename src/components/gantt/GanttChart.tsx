@@ -1,8 +1,11 @@
 "use client";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Plus, Minus, ExternalLink } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { createPortal } from "react-dom";
+import { ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Plus, Minus, ExternalLink, Check, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import { loadNotionIdMap } from "@/lib/notion-id-map";
+import { explicitSprintIndex, currentSprintIndex } from "@/lib/sprints";
 
 type Task = {
   id: string;
@@ -120,26 +123,14 @@ function buildSprints(count: number): Sprint[] {
   return out;
 }
 
-// A task is "in" a sprint if:
-// 1) its due_date (if set) falls on or before the sprint end AND on/after sprint start, OR
-// 2) no due date, but created_at is at least 7 days before sprint start
+// A task's sprint is whichever sprint it has been assigned to via the
+// "sprint:N" tag. Tasks without an explicit tag default to the current
+// sprint (the one whose date range contains today). This way future
+// sprints stay empty unless the user explicitly drops tasks into them.
 function sprintForTask(task: Task, sprints: Sprint[]): Sprint | null {
-  const due = toDate(task.due_date ?? null);
-  const created = toDate(task.created_at ?? null);
-
-  if (due) {
-    // Find earliest sprint whose end covers the due date
-    for (const s of sprints) {
-      if (due <= s.end) return s;
-    }
-    return sprints[sprints.length - 1] ?? null;
-  }
-  if (created) {
-    for (const s of sprints) {
-      if (addDays(created, 7) <= s.start) return s;
-    }
-  }
-  return null;
+  let idx = explicitSprintIndex(task.tags ?? null);
+  if (idx == null) idx = currentSprintIndex(sprints.length);
+  return sprints.find(s => s.index === idx) ?? null;
 }
 
 function weekIndexOf(date: Date, sprints: Sprint[]): number | null {
@@ -154,6 +145,7 @@ function weekIndexOf(date: Date, sprints: Sprint[]): number | null {
 }
 
 export default function GanttChart({ pillars }: Props) {
+  const router = useRouter();
   const [sprintCount, setSprintCount] = useState<number>(DEFAULT_SPRINT_COUNT);
   const [hydrated, setHydrated] = useState(false);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -167,6 +159,17 @@ export default function GanttChart({ pillars }: Props) {
     loadNotionIdMap().then(map => { if (!cancelled) setNotionIdMap(map); });
     return () => { cancelled = true; };
   }, []);
+
+  async function setTaskSprint(taskId: string, sprintIdx: number | null): Promise<void> {
+    try {
+      await fetch(`/api/tasks/${taskId}/sprint`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sprintIndex: sprintIdx }),
+      });
+      router.refresh();
+    } catch { /* ignore */ }
+  }
 
   // Load sprint count + label width + saved drawer state — mount-only.
   // Drawers default CLOSED; whatever the user opens persists per browser.
@@ -320,28 +323,37 @@ export default function GanttChart({ pillars }: Props) {
     return () => { cancelled = true; };
   }, [currentSprint, pillars]);
 
-  const allPillars = useMemo<Pillar[]>(
-    () => othersPillar ? [...pillars, othersPillar] : pillars,
-    [pillars, othersPillar]
-  );
+  const allPillars = useMemo<Pillar[]>(() => {
+    // Others is current-sprint-only by definition (it shows recent
+    // unplanned completions). Hide it entirely if the current sprint
+    // isn't visible.
+    const currentIdx = currentSprintIndex(allSprints.length);
+    const includeOthers = othersPillar && visibleSprints.has(currentIdx);
+    return includeOthers ? [...pillars, othersPillar!] : pillars;
+  }, [pillars, othersPillar, allSprints.length, visibleSprints]);
 
-  // When normalized: drop tasks whose created_at is in the LAST WEEK of the
-  // sprint they belong to. This shows the Gantt as it was planned, ignoring
-  // tasks added late in the sprint (ongoing work).
+  // 1) Filter each pillar's tasks to those whose assigned sprint is currently
+  //    visible. Tasks without an explicit sprint:N tag fall back to current.
+  // 2) When normalized: also drop tasks whose created_at is in the LAST WEEK
+  //    of their sprint (planning view, not ongoing).
   const displayPillars = useMemo<Pillar[]>(() => {
-    if (!normalized) return allPillars;
     return allPillars.map(p => ({
       ...p,
       tasks: (p.tasks ?? []).filter(t => {
         const sprint = sprintForTask(t, allSprints);
-        if (!sprint) return true;
-        const created = toDate(t.created_at ?? null);
-        if (!created) return true;
-        const cutoff = addDays(sprint.end, -7);
-        return created < cutoff;
+        if (!sprint) return false;
+        if (!visibleSprints.has(sprint.index)) return false;
+        if (normalized) {
+          const created = toDate(t.created_at ?? null);
+          if (created) {
+            const cutoff = addDays(sprint.end, -7);
+            if (created >= cutoff) return false;
+          }
+        }
+        return true;
       }),
     }));
-  }, [allPillars, allSprints, normalized]);
+  }, [allPillars, allSprints, visibleSprints, normalized]);
 
   // Completion % per sprint (across all pillars' tasks that belong to that sprint)
   const sprintCompletion = useMemo(() => {
@@ -555,7 +567,7 @@ export default function GanttChart({ pillars }: Props) {
 
                 {isOpen && openTasks.length > 0 && (
                   <div>
-                    {openTasks.map(task => <TaskRow key={task.id} task={task} sprints={shownSprints} totalWeeks={totalWeeks} labelWidth={labelWidth} pillarColor={pillar.color} notionIdMap={notionIdMap} />)}
+                    {openTasks.map(task => <TaskRow key={task.id} task={task} sprints={shownSprints} allSprintsCount={sprintCount} totalWeeks={totalWeeks} labelWidth={labelWidth} pillarColor={pillar.color} notionIdMap={notionIdMap} onSetSprint={setTaskSprint} isSyntheticOthers={pillar.id === "__others__"} />)}
                   </div>
                 )}
                 {isOpen && openTasks.length === 0 && (
@@ -570,13 +582,16 @@ export default function GanttChart({ pillars }: Props) {
   );
 }
 
-function TaskRow({ task, sprints, totalWeeks, labelWidth, pillarColor, notionIdMap }: {
+function TaskRow({ task, sprints, allSprintsCount, totalWeeks, labelWidth, pillarColor, notionIdMap, onSetSprint, isSyntheticOthers }: {
   task: Task;
   sprints: Sprint[];
+  allSprintsCount: number;
   totalWeeks: number;
   labelWidth: number;
   pillarColor?: string;
   notionIdMap: Record<string, number>;
+  onSetSprint: (taskId: string, sprintIdx: number | null) => Promise<void>;
+  isSyntheticOthers: boolean;
 }) {
   const notionId = task.notion_page_id ? notionIdMap[task.notion_page_id] : undefined;
   const targetSprint = sprintForTask(task, sprints);
@@ -602,7 +617,8 @@ function TaskRow({ task, sprints, totalWeeks, labelWidth, pillarColor, notionIdM
   };
 
   const barColor = pillarColor && pillarColor.startsWith("#") ? pillarColor : "#6366f1";
-  const tag = task.tags?.find(t => !t.startsWith("notion:"));
+  const tag = task.tags?.find(t => !t.includes(":"));
+  const taskSprintIdx = explicitSprintIndex(task.tags ?? null) ?? currentSprintIndex(sprints.length);
 
   return (
     <div
@@ -637,6 +653,13 @@ function TaskRow({ task, sprints, totalWeeks, labelWidth, pillarColor, notionIdM
         <span className={clsx("text-[10px] px-1.5 py-0.5 rounded border shrink-0", STATUS_STYLE[state] ?? STATUS_STYLE.todo)}>
           {STATUS_LABEL[state] ?? state}
         </span>
+        {!isSyntheticOthers && (
+          <SprintPicker
+            current={taskSprintIdx}
+            count={allSprintsCount}
+            onPick={idx => onSetSprint(task.id, idx)}
+          />
+        )}
         <span className="text-[10px] text-gray-500 shrink-0 tabular-nums">{completionPct}%</span>
         {due && (
           <span className="text-[10px] text-gray-500 shrink-0 tabular-nums">
@@ -686,5 +709,90 @@ function TaskRow({ task, sprints, totalWeeks, labelWidth, pillarColor, notionIdM
         </div>
       </div>
     </div>
+  );
+}
+
+function SprintPicker({ current, count, onPick }: {
+  current: number;
+  count: number;
+  onPick: (idx: number) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const MENU_W = 140;
+  const ROW_H = 28;
+  const MENU_H = count * ROW_H + 8;
+
+  function computePos() {
+    const r = triggerRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const spaceBelow = window.innerHeight - r.bottom;
+    const goUp = spaceBelow < MENU_H + 12;
+    const top = goUp ? Math.max(8, r.top - MENU_H - 4) : r.bottom + 4;
+    const right = Math.max(8, window.innerWidth - r.right);
+    setPos({ top, right });
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function handler(e: MouseEvent) {
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t)) return;
+      if (triggerRef.current?.contains(t)) return;
+      setOpen(false);
+    }
+    function onMove() { computePos(); }
+    document.addEventListener("mousedown", handler);
+    window.addEventListener("scroll", onMove, true);
+    window.addEventListener("resize", onMove);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", onMove);
+    };
+  }, [open]);
+
+  async function pick(idx: number) {
+    if (idx === current) { setOpen(false); return; }
+    setBusy(true);
+    try { await onPick(idx); } finally { setBusy(false); setOpen(false); }
+  }
+
+  function toggle() {
+    if (!open) computePos();
+    setOpen(o => !o);
+  }
+
+  const menu = open && pos && (
+    <div
+      ref={menuRef}
+      style={{ position: "fixed", top: pos.top, right: pos.right, width: MENU_W, zIndex: 60 }}
+      className="bg-white border border-gray-200 rounded-lg shadow-lg py-1"
+      onClick={e => e.stopPropagation()}
+    >
+      {Array.from({ length: count }, (_, i) => i + 1).map(n => (
+        <button key={n} onClick={() => pick(n)}
+          className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 text-right">
+          <span>Sprint {n}</span>
+          {n === current && <Check size={12} className="text-indigo-500" />}
+        </button>
+      ))}
+    </div>
+  );
+
+  return (
+    <>
+      <button ref={triggerRef} onClick={toggle}
+        className="inline-flex items-center gap-0.5 text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-600 hover:border-gray-400 transition-colors shrink-0"
+        title={`Sprint ${current} — לחיצה כדי לשנות`}>
+        S{current}
+        {busy ? <Loader2 size={9} className="animate-spin" /> : <ChevronDown size={9} className="opacity-60" />}
+      </button>
+      {typeof window !== "undefined" && menu && createPortal(menu, document.body)}
+    </>
   );
 }

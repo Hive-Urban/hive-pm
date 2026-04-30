@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { fetchNotionTasks } from "@/lib/notion";
+import { currentSprintIndex, SPRINT_TAG_PREFIX } from "@/lib/sprints";
 
 // Sync Notion tasks into a pillar
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -23,12 +24,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
       .select("notion_page_id")
       .in("notion_page_id", selected.map(t => t.id));
     const existingIds = new Set((existing ?? []).map(r => r.notion_page_id));
+    const sprintIdx = currentSprintIndex();
     const toInsert = selected
       .filter(t => !existingIds.has(t.id))
       .map(t => {
         const tags: string[] = [];
         if (t.type) tags.push(t.type);
         if (t.status && t.status.toLowerCase().includes("approved")) tags.push("notion:approved");
+        tags.push(`${SPRINT_TAG_PREFIX}${sprintIdx}`);
         return {
           pillar_id: id,
           title: t.name,

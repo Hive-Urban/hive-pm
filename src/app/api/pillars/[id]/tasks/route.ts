@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { currentSprintIndex, SPRINT_TAG_PREFIX } from "@/lib/sprints";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -22,9 +23,11 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { id } = await params;
     const body = await req.json();
     const db = supabaseAdmin();
+    const incomingTags: string[] = Array.isArray(body.tags) ? body.tags : [];
+    const tags = [...incomingTags, `${SPRINT_TAG_PREFIX}${currentSprintIndex()}`];
     const { data, error } = await db
       .from("tasks")
-      .insert({ ...body, pillar_id: id, source: "manual" })
+      .insert({ ...body, tags, pillar_id: id, source: "manual" })
       .select()
       .single();
     if (error) throw error;

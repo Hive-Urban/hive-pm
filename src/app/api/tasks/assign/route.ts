@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { fetchNotionTaskByPageId } from "@/lib/notion";
+import { currentSprintIndex, SPRINT_TAG_PREFIX } from "@/lib/sprints";
 
 function mapStatus(s: string | null): "todo" | "in_progress" | "done" | "blocked" {
   if (!s) return "todo";
@@ -49,6 +50,7 @@ export async function POST(req: NextRequest) {
     const tags: string[] = [];
     if (t.type) tags.push(t.type);
     if (t.status && t.status.toLowerCase().includes("approved")) tags.push("notion:approved");
+    tags.push(`${SPRINT_TAG_PREFIX}${currentSprintIndex()}`);
 
     const row = {
       pillar_id: targetPillar,
