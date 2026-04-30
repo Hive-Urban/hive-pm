@@ -409,16 +409,16 @@ export default function GanttChart({ pillars }: Props) {
           {/* Toolbar: collapse/expand all pillars */}
           <div className="flex items-center px-4 py-2 border-b border-gray-100 bg-white">
             {(() => {
-              const allOpen = allPillars.length > 0 && allPillars.every(p => expanded.has(p.id));
-              const Icon = allOpen ? ChevronsDownUp : ChevronsUpDown;
+              const anyOpen = allPillars.some(p => expanded.has(p.id));
+              const Icon = anyOpen ? ChevronsDownUp : ChevronsUpDown;
               return (
                 <button
                   onClick={() =>
-                    setExpanded(allOpen ? new Set() : new Set(allPillars.map(p => p.id)))
+                    setExpanded(anyOpen ? new Set() : new Set(allPillars.map(p => p.id)))
                   }
                   disabled={allPillars.length === 0}
                   className="group flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 px-2 py-1 -mx-1 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
-                  title={allOpen ? "סגור הכל" : "פתח הכל"}>
+                  title={anyOpen ? "סגור הכל" : "פתח הכל"}>
                   <Icon size={14} className="text-gray-400 group-hover:text-gray-700 transition-colors" />
                   <span>{allPillars.length} פילרים</span>
                 </button>
