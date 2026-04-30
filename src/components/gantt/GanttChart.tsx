@@ -40,6 +40,7 @@ const DEFAULT_SPRINT_COUNT = 4;
 const SPRINT_STORAGE_KEY = "gantt:sprintCount";
 const LABEL_WIDTH_KEY = "gantt:labelWidth";
 const EXPANDED_KEY = "gantt:expandedPillars";
+const NORMALIZED_KEY = "gantt:normalized";
 const LABEL_WIDTH_DEFAULT = 360;
 const LABEL_WIDTH_MIN = 220;
 const LABEL_WIDTH_MAX = 720;
@@ -156,6 +157,7 @@ export default function GanttChart({ pillars }: Props) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [visibleSprints, setVisibleSprints] = useState<Set<number>>(new Set());
   const [labelWidth, setLabelWidth] = useState<number>(LABEL_WIDTH_DEFAULT);
+  const [normalized, setNormalized] = useState<boolean>(false);
 
   // Load sprint count + label width + saved drawer state — mount-only.
   // Drawers default CLOSED; whatever the user opens persists per browser.
@@ -180,11 +182,18 @@ export default function GanttChart({ pillars }: Props) {
         const ids = JSON.parse(eRaw);
         if (Array.isArray(ids)) setExpanded(new Set(ids.filter(x => typeof x === "string")));
       }
+      const nRaw = localStorage.getItem(NORMALIZED_KEY);
+      if (nRaw === "true") setNormalized(true);
     } catch {
       /* noop */
     }
     setHydrated(true);
   }, []);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try { localStorage.setItem(NORMALIZED_KEY, String(normalized)); } catch { /* noop */ }
+  }, [hydrated, normalized]);
 
   // Persist drawer state per browser
   useEffect(() => {
@@ -307,12 +316,30 @@ export default function GanttChart({ pillars }: Props) {
     [pillars, othersPillar]
   );
 
+  // When normalized: drop tasks whose created_at is in the LAST WEEK of the
+  // sprint they belong to. This shows the Gantt as it was planned, ignoring
+  // tasks added late in the sprint (ongoing work).
+  const displayPillars = useMemo<Pillar[]>(() => {
+    if (!normalized) return allPillars;
+    return allPillars.map(p => ({
+      ...p,
+      tasks: (p.tasks ?? []).filter(t => {
+        const sprint = sprintForTask(t, allSprints);
+        if (!sprint) return true;
+        const created = toDate(t.created_at ?? null);
+        if (!created) return true;
+        const cutoff = addDays(sprint.end, -7);
+        return created < cutoff;
+      }),
+    }));
+  }, [allPillars, allSprints, normalized]);
+
   // Completion % per sprint (across all pillars' tasks that belong to that sprint)
   const sprintCompletion = useMemo(() => {
     const map = new Map<number, number>();
     for (const s of allSprints) {
       const tasksInSprint: Task[] = [];
-      for (const p of allPillars) {
+      for (const p of displayPillars) {
         for (const t of p.tasks ?? []) {
           if (sprintForTask(t, allSprints)?.index === s.index) tasksInSprint.push(t);
         }
@@ -325,7 +352,7 @@ export default function GanttChart({ pillars }: Props) {
       }
     }
     return map;
-  }, [allSprints, allPillars]);
+  }, [allSprints, displayPillars]);
 
   function toggleSprint(idx: number) {
     setVisibleSprints(prev => {
@@ -406,24 +433,32 @@ export default function GanttChart({ pillars }: Props) {
         </div>
       ) : (
         <div className="bg-white border border-gray-200 rounded-2xl overflow-hidden shadow-sm">
-          {/* Toolbar: collapse/expand all pillars */}
-          <div className="flex items-center px-4 py-2 border-b border-gray-100 bg-white">
+          {/* Toolbar: collapse/expand all pillars + Normalized */}
+          <div className="flex items-center justify-between px-4 py-2 border-b border-gray-100 bg-white">
             {(() => {
-              const anyOpen = allPillars.some(p => expanded.has(p.id));
+              const anyOpen = displayPillars.some(p => expanded.has(p.id));
               const Icon = anyOpen ? ChevronsDownUp : ChevronsUpDown;
               return (
                 <button
                   onClick={() =>
-                    setExpanded(anyOpen ? new Set() : new Set(allPillars.map(p => p.id)))
+                    setExpanded(anyOpen ? new Set() : new Set(displayPillars.map(p => p.id)))
                   }
-                  disabled={allPillars.length === 0}
+                  disabled={displayPillars.length === 0}
                   className="group flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 px-2 py-1 -mx-1 rounded-md hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:hover:bg-transparent"
                   title={anyOpen ? "סגור הכל" : "פתח הכל"}>
                   <Icon size={14} className="text-gray-400 group-hover:text-gray-700 transition-colors" />
-                  <span>{allPillars.length} פילרים</span>
+                  <span>{displayPillars.length} פילרים</span>
                 </button>
               );
             })()}
+            <label className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-800 cursor-pointer select-none px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
+              title="הסתר משימות שנוספו בשבוע האחרון של הספרינט — משקף תכנון, לא Ongoing">
+              <input type="checkbox"
+                checked={normalized}
+                onChange={e => setNormalized(e.target.checked)}
+                className="w-3.5 h-3.5 accent-indigo-600 cursor-pointer" />
+              <span>Normalized</span>
+            </label>
           </div>
           {/* Grid header */}
           <div
@@ -464,10 +499,10 @@ export default function GanttChart({ pillars }: Props) {
           </div>
 
           {/* Pillar rows */}
-          {allPillars.length === 0 && (
+          {displayPillars.length === 0 && (
             <div className="px-6 py-12 text-center text-gray-400">אין פילרים להצגה</div>
           )}
-          {allPillars.map((pillar, idx) => {
+          {displayPillars.map((pillar, idx) => {
             const allTasks = pillar.tasks ?? [];
             const activeTasks = allTasks.filter(isActiveTask);
             const openTasks = allTasks; // show every task; completion shows via bar/label
