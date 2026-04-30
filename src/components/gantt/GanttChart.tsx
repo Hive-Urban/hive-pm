@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Plus, Minus, ExternalLink, Check, Loader2 } from "lucide-react";
 import clsx from "clsx";
-import { loadNotionIdMap } from "@/lib/notion-id-map";
+import { loadNotionMetaMap } from "@/lib/notion-id-map";
 import { explicitSprintIndex, currentSprintIndex, isSprintCleared } from "@/lib/sprints";
 
 type Task = {
@@ -156,10 +156,15 @@ export default function GanttChart({ pillars }: Props) {
   const [labelWidth, setLabelWidth] = useState<number>(LABEL_WIDTH_DEFAULT);
   const [normalized, setNormalized] = useState<boolean>(false);
   const [notionIdMap, setNotionIdMap] = useState<Record<string, number>>({});
+  const [notionPriorityMap, setNotionPriorityMap] = useState<Record<string, string>>({});
 
   useEffect(() => {
     let cancelled = false;
-    loadNotionIdMap().then(map => { if (!cancelled) setNotionIdMap(map); });
+    loadNotionMetaMap().then(meta => {
+      if (cancelled) return;
+      setNotionIdMap(meta.ids);
+      setNotionPriorityMap(meta.priorities);
+    });
     return () => { cancelled = true; };
   }, []);
 
@@ -659,33 +664,28 @@ export default function GanttChart({ pillars }: Props) {
                             const tPct = Math.round(taskCompletion(t) * 100);
                             const tTag = t.tags?.find(tag => !tag.includes(":"));
                             const tDue = toDate(t.due_date ?? null);
+                            const tPriority = t.notion_page_id ? notionPriorityMap[t.notion_page_id] : undefined;
+                            const meta = [
+                              tTag,
+                              t.product,
+                              STATUS_LABEL[tState] ?? tState,
+                              tPriority,
+                              `${tPct}%`,
+                              tDue ? formatLong(tDue) : null,
+                              where,
+                            ].filter(Boolean) as string[];
                             return (
                               <button key={t.id}
                                 onClick={() => setTaskSprint(t.id, targetSprintIdx)}
-                                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-gray-700 hover:bg-white border border-transparent hover:border-gray-200 transition-colors text-right group/cand">
+                                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-gray-600 hover:bg-white border border-transparent hover:border-gray-200 transition-colors text-right group/cand">
                                 {tNotionId != null && (
                                   <span className="text-[10px] font-mono text-gray-400 tabular-nums shrink-0 w-10 text-left">#{tNotionId}</span>
                                 )}
-                                <span className="flex-1 truncate">{t.title}</span>
-                                {tTag && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-500 capitalize shrink-0">
-                                    {tTag}
-                                  </span>
-                                )}
-                                {t.product && (
-                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-200 shrink-0">
-                                    {t.product}
-                                  </span>
-                                )}
-                                <span className={clsx("text-[10px] px-1.5 py-0.5 rounded border shrink-0", STATUS_STYLE[tState] ?? STATUS_STYLE.todo)}>
-                                  {STATUS_LABEL[tState] ?? tState}
+                                <span className="flex-1 truncate text-gray-700">{t.title}</span>
+                                <span className="text-[10px] text-gray-500 shrink-0 tabular-nums">
+                                  {meta.join(" · ")}
                                 </span>
-                                <span className="text-[10px] text-gray-500 tabular-nums shrink-0">{tPct}%</span>
-                                {tDue && (
-                                  <span className="text-[10px] text-gray-500 tabular-nums shrink-0">📅 {formatLong(tDue)}</span>
-                                )}
-                                <span className="text-[10px] text-gray-400 shrink-0">{where}</span>
-                                <Plus size={11} className="text-indigo-500 shrink-0 opacity-50 group-hover/cand:opacity-100" />
+                                <Plus size={11} className="text-indigo-500 shrink-0 opacity-40 group-hover/cand:opacity-100" />
                               </button>
                             );
                           })}

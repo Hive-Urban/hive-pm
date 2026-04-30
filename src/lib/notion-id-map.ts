@@ -1,22 +1,40 @@
-// Shared client-side cache for the notion_page_id -> #N map.
-// Used by both PillarBlock and GanttChart so a single fetch covers
-// every place that wants to render task IDs.
+// Shared client-side cache for Notion metadata keyed by notion_page_id.
+// Used by PillarBlock, GanttChart, and the candidate picker so a single
+// fetch covers every place that wants to render task IDs / priorities.
 
-let cached: { map: Record<string, number>; at: number } | null = null;
+export type NotionMeta = {
+  ids: Record<string, number>;
+  priorities: Record<string, string>;
+};
+
+let cached: { meta: NotionMeta; at: number } | null = null;
 const TTL_MS = 60_000;
 
-export async function loadNotionIdMap(): Promise<Record<string, number>> {
-  if (cached && Date.now() - cached.at < TTL_MS) return cached.map;
+async function loadNotionMeta(): Promise<NotionMeta> {
+  if (cached && Date.now() - cached.at < TTL_MS) return cached.meta;
   try {
     const res = await fetch("/api/notion/id-map");
-    if (!res.ok) return {};
+    if (!res.ok) return { ids: {}, priorities: {} };
     const data = await res.json();
-    const map: Record<string, number> = data.map ?? {};
-    cached = { map, at: Date.now() };
-    return map;
+    const meta: NotionMeta = {
+      ids: data.map ?? {},
+      priorities: data.priorities ?? {},
+    };
+    cached = { meta, at: Date.now() };
+    return meta;
   } catch {
-    return {};
+    return { ids: {}, priorities: {} };
   }
+}
+
+// Backwards-compat: many call sites only need the id map.
+export async function loadNotionIdMap(): Promise<Record<string, number>> {
+  const meta = await loadNotionMeta();
+  return meta.ids;
+}
+
+export async function loadNotionMetaMap(): Promise<NotionMeta> {
+  return loadNotionMeta();
 }
 
 export function clearNotionIdMapCache(): void {
