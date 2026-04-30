@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Plus, Loader2, Pencil, Check } from "lucide-react";
 import PillarBlock from "@/components/vision/PillarBlock";
+import RefreshDataButton from "@/components/RefreshDataButton";
 
 type Task = {
   id: string; title: string;
@@ -102,15 +103,8 @@ export default function VisionPage() {
     "Become a core intelligence infrastructure for campaigns — a unified, AI-driven platform that replaces fragmented campaign research with a single operating system."
   );
 
-  async function load(syncFirst = false) {
+  async function load() {
     setLoading(true);
-    if (syncFirst) {
-      // Pull fresh statuses from Notion before showing the page so what the
-      // user sees matches what's currently in Notion.
-      try {
-        await fetch("/api/sync-from-notion", { method: "POST" });
-      } catch { /* render with whatever's in DB */ }
-    }
     const res = await fetch("/api/pillars");
     const data = await res.json();
     const list: Pillar[] = data.pillars ?? [];
@@ -119,7 +113,7 @@ export default function VisionPage() {
     setLoading(false);
   }
 
-  useEffect(() => { load(true); }, []);
+  useEffect(() => { load(); }, []);
 
   async function addPillar() {
     setAdding(true);
@@ -157,6 +151,10 @@ export default function VisionPage() {
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
+      <div className="flex justify-end">
+        <RefreshDataButton />
+      </div>
+
       {/* Vision */}
       <div className="bg-white rounded-2xl border border-gray-200 p-6 shadow-sm">
         <div className="flex items-start justify-between gap-4">
