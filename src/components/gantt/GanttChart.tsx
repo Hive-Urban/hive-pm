@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Plus, Minus, ExternalLink, Check, Loader2 } from "lucide-react";
 import clsx from "clsx";
 import { loadNotionIdMap } from "@/lib/notion-id-map";
-import { explicitSprintIndex, currentSprintIndex } from "@/lib/sprints";
+import { explicitSprintIndex, currentSprintIndex, isSprintCleared } from "@/lib/sprints";
 
 type Task = {
   id: string;
@@ -128,6 +128,9 @@ function buildSprints(count: number): Sprint[] {
 // sprint (the one whose date range contains today). This way future
 // sprints stay empty unless the user explicitly drops tasks into them.
 function sprintForTask(task: Task, sprints: Sprint[]): Sprint | null {
+  // Tasks that were explicitly cleared from a sprint stay hidden (no
+  // fallback to current). Truly untagged tasks fall back to current.
+  if (isSprintCleared(task.tags ?? null)) return null;
   let idx = explicitSprintIndex(task.tags ?? null);
   if (idx == null) idx = currentSprintIndex(sprints.length);
   return sprints.find(s => s.index === idx) ?? null;
@@ -169,6 +172,19 @@ export default function GanttChart({ pillars }: Props) {
       });
       router.refresh();
     } catch { /* ignore */ }
+  }
+
+  const [clearingSprint, setClearingSprint] = useState<number | null>(null);
+  const [clearBusy, setClearBusy] = useState(false);
+
+  async function clearSprint(idx: number): Promise<void> {
+    setClearBusy(true);
+    try {
+      await fetch(`/api/sprints/${idx}/clear`, { method: "POST" });
+      router.refresh();
+    } catch { /* ignore */ }
+    setClearBusy(false);
+    setClearingSprint(null);
   }
 
   // Load sprint count + label width + saved drawer state — mount-only.
@@ -417,7 +433,7 @@ export default function GanttChart({ pillars }: Props) {
       {/* Sprint selector */}
       <div className="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm">
         <div className="flex items-center justify-between mb-3">
-          <p className="text-xs text-gray-500">ספרינטים — לחץ/י לשינוי הנוכחי</p>
+          <p className="text-xs text-gray-500">ספרינטים — לחץ/י לשינוי הנוכחי · קליק-ימני לניקוי משימות</p>
           <div className="flex items-center gap-1">
             <button onClick={removeLastSprint} disabled={sprintCount <= 1}
               className="p-1.5 rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 disabled:opacity-40">
@@ -434,7 +450,9 @@ export default function GanttChart({ pillars }: Props) {
             const isOn = visibleSprints.has(s.index);
             const pct = Math.round((sprintCompletion.get(s.index) ?? 0) * 100);
             return (
-              <button key={s.index} onClick={() => toggleSprint(s.index)}
+              <button key={s.index}
+                onClick={() => toggleSprint(s.index)}
+                onContextMenu={e => { e.preventDefault(); setClearingSprint(s.index); }}
                 className={clsx("inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border transition-colors",
                   isOn ? "bg-indigo-50 border-indigo-200 text-indigo-700"
                        : "bg-white border-gray-200 text-gray-500 hover:border-gray-300")}>
@@ -576,6 +594,36 @@ export default function GanttChart({ pillars }: Props) {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {clearingSprint != null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          onClick={() => !clearBusy && setClearingSprint(null)}>
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6"
+            onClick={e => e.stopPropagation()}>
+            <h3 className="text-base font-semibold text-gray-900 mb-2">
+              לנקות את Sprint {clearingSprint}?
+            </h3>
+            <p className="text-sm text-gray-600 leading-relaxed mb-5">
+              כל המשימות שמשויכות ל-Sprint {clearingSprint} יוסרו ממנו.
+              הן <strong>לא</strong> יחזרו אוטומטית לספרינט הנוכחי —
+              יוצגו רק אחרי שיוך ידני מחדש (S{clearingSprint} בשורה של כל משימה).
+            </p>
+            <div className="flex items-center justify-end gap-2">
+              <button onClick={() => setClearingSprint(null)}
+                disabled={clearBusy}
+                className="px-3 py-1.5 text-xs text-gray-600 hover:text-gray-900 disabled:opacity-50">
+                ביטול
+              </button>
+              <button onClick={() => clearSprint(clearingSprint)}
+                disabled={clearBusy}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-red-600 hover:bg-red-700 rounded-md disabled:opacity-50">
+                {clearBusy && <Loader2 size={12} className="animate-spin" />}
+                נקה ספרינט
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

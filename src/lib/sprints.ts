@@ -51,6 +51,14 @@ export function explicitSprintIndex(tags: string[] | null | undefined): number |
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+// A task that was deliberately removed from a sprint carries `sprint:0`.
+// It is NOT auto-assigned to the current sprint (unlike a fully-untagged
+// task) so a "Clear sprint" action keeps cleared tasks hidden until the
+// user decides where they belong.
+export function isSprintCleared(tags: string[] | null | undefined): boolean {
+  return !!tags?.includes(`${SPRINT_TAG_PREFIX}0`);
+}
+
 export function withSprintTag(tags: string[], sprintIdx: number): string[] {
   const without = tags.filter(t => !t.startsWith(SPRINT_TAG_PREFIX));
   return [...without, `${SPRINT_TAG_PREFIX}${sprintIdx}`];
