@@ -368,7 +368,12 @@ export default function GanttChart({ pillars }: Props) {
           const created = toDate(t.created_at ?? null);
           if (created) {
             const cutoff = addDays(sprint.end, -7);
-            if (created >= cutoff) return false;
+            // Hide late additions only if they are still open. If a late
+            // task is already done/approved, count it — it's real delivery.
+            if (created >= cutoff) {
+              const state = taskState(t);
+              if (state !== "done" && state !== "approved") return false;
+            }
           }
         }
         return true;
