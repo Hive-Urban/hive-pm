@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, ExternalLink, Flame, Rocket, Loader2, Check } from "lucide-react";
 import clsx from "clsx";
+import { explicitSprintIndex, currentSprintIndex } from "@/lib/sprints";
 
 type NotionTask = {
   id: string;
@@ -21,7 +22,11 @@ type DbTask = {
   id: string;
   notion_page_id?: string | null;
   pillar_id?: string | null;
+  tags?: string[] | null;
 };
+
+const SPRINT_COUNT_KEY = "gantt:sprintCount";
+const DEFAULT_SPRINT_COUNT = 4;
 
 type Pillar = {
   id: string;
@@ -133,6 +138,34 @@ export default function NotionTasksSummary({ pillars }: Props) {
 
   useEffect(() => { setPillarByPageId(initialMap); }, [initialMap]);
 
+  // Sprint count (mirrors the Gantt's localStorage value so the dropdown
+  // shows the same set of sprints).
+  const [sprintCount, setSprintCount] = useState<number>(DEFAULT_SPRINT_COUNT);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SPRINT_COUNT_KEY);
+      const n = raw ? parseInt(raw, 10) : NaN;
+      if (Number.isFinite(n) && n > 0) setSprintCount(n);
+    } catch { /* noop */ }
+  }, []);
+
+  // Map: notion_page_id -> explicit sprint index (only if the DB row carries
+  // a sprint:N tag). Tasks without a DB row, or without an explicit tag,
+  // show as "Unassigned" in the dropdown.
+  const sprintByPageId = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const p of pillars) {
+      for (const t of p.tasks ?? []) {
+        if (!t.notion_page_id) continue;
+        const idx = explicitSprintIndex(t.tags ?? null);
+        if (idx != null) map.set(t.notion_page_id, idx);
+      }
+    }
+    return map;
+  }, [pillars]);
+  const [sprintByPageIdLocal, setSprintByPageIdLocal] = useState<Map<string, number>>(sprintByPageId);
+  useEffect(() => { setSprintByPageIdLocal(sprintByPageId); }, [sprintByPageId]);
+
   async function assignTask(notionPageId: string, pillarId: string | null): Promise<void> {
     const prev = pillarByPageId;
     const next = new Map(prev);
@@ -152,6 +185,24 @@ export default function NotionTasksSummary({ pillars }: Props) {
       router.refresh();
     } catch {
       setPillarByPageId(prev); // rollback
+    }
+  }
+
+  async function assignSprint(notionPageId: string, sprintIdx: number): Promise<void> {
+    const prev = sprintByPageIdLocal;
+    const next = new Map(prev);
+    next.set(notionPageId, sprintIdx);
+    setSprintByPageIdLocal(next);
+    try {
+      const res = await fetch("/api/tasks/pin-notion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notion_page_id: notionPageId, sprintIndex: sprintIdx }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      router.refresh();
+    } catch {
+      setSprintByPageIdLocal(prev);
     }
   }
 
@@ -206,7 +257,10 @@ export default function NotionTasksSummary({ pillars }: Props) {
         error={error}
         pillarByPageId={pillarByPageId}
         pillars={pillars}
+        sprintByPageId={sprintByPageIdLocal}
+        sprintCount={sprintCount}
         onAssign={assignTask}
+        onAssignSprint={assignSprint}
         storageKey={HOT_OPEN_KEY}
         toolbar={
           <div className="flex items-center gap-1 bg-gray-100 rounded-md p-0.5"
@@ -234,14 +288,17 @@ export default function NotionTasksSummary({ pillars }: Props) {
         error={error}
         pillarByPageId={pillarByPageId}
         pillars={pillars}
+        sprintByPageId={sprintByPageIdLocal}
+        sprintCount={sprintCount}
         onAssign={assignTask}
+        onAssignSprint={assignSprint}
         storageKey={PRODUCTION_OPEN_KEY}
       />
     </div>
   );
 }
 
-function DigestPanel({ title, subtitle, icon, tasks, loading, error, pillarByPageId, pillars, onAssign, toolbar, storageKey }: {
+function DigestPanel({ title, subtitle, icon, tasks, loading, error, pillarByPageId, pillars, sprintByPageId, sprintCount, onAssign, onAssignSprint, toolbar, storageKey }: {
   title: string;
   subtitle: string;
   icon: React.ReactNode;
@@ -250,7 +307,10 @@ function DigestPanel({ title, subtitle, icon, tasks, loading, error, pillarByPag
   error: string | null;
   pillarByPageId: Map<string, Pillar>;
   pillars: Pillar[];
+  sprintByPageId: Map<string, number>;
+  sprintCount: number;
   onAssign: (notionPageId: string, pillarId: string | null) => Promise<void>;
+  onAssignSprint: (notionPageId: string, sprintIdx: number) => Promise<void>;
   toolbar?: React.ReactNode;
   storageKey?: string;
 }) {
@@ -331,6 +391,11 @@ function DigestPanel({ title, subtitle, icon, tasks, loading, error, pillarByPag
                     current={pillar}
                     pillars={pillars}
                     onPick={pid => onAssign(task.id, pid)}
+                  />
+                  <SprintMenu
+                    current={sprintByPageId.get(task.id) ?? null}
+                    count={sprintCount}
+                    onPick={idx => onAssignSprint(task.id, idx)}
                   />
                   <a href={task.page_url} target="_blank" rel="noopener noreferrer"
                     onClick={e => e.stopPropagation()}
@@ -441,6 +506,96 @@ function PillarMenu({ current, pillars, onPick }: {
             {current.name}
           </>
         ) : "Unassigned"}
+        {busy ? <Loader2 size={10} className="animate-spin" /> : <ChevronDown size={10} className="opacity-60" />}
+      </button>
+      {typeof window !== "undefined" && menu && createPortal(menu, document.body)}
+    </>
+  );
+}
+
+function SprintMenu({ current, count, onPick }: {
+  current: number | null;
+  count: number;
+  onPick: (idx: number) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  const MENU_W = 140;
+  const ROW_H = 28;
+  const MENU_H = count * ROW_H + 8;
+  const todayCurrent = currentSprintIndex(count);
+
+  function computePos() {
+    const r = triggerRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const spaceBelow = window.innerHeight - r.bottom;
+    const goUp = spaceBelow < MENU_H + 12;
+    const top = goUp ? Math.max(8, r.top - MENU_H - 4) : r.bottom + 4;
+    const right = Math.max(8, window.innerWidth - r.right);
+    setPos({ top, right });
+  }
+
+  useEffect(() => {
+    if (!open) return;
+    function handler(e: MouseEvent) {
+      const t = e.target as Node;
+      if (menuRef.current?.contains(t)) return;
+      if (triggerRef.current?.contains(t)) return;
+      setOpen(false);
+    }
+    function onMove() { computePos(); }
+    document.addEventListener("mousedown", handler);
+    window.addEventListener("scroll", onMove, true);
+    window.addEventListener("resize", onMove);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      window.removeEventListener("scroll", onMove, true);
+      window.removeEventListener("resize", onMove);
+    };
+  }, [open]);
+
+  async function pick(idx: number) {
+    if (idx === current) { setOpen(false); return; }
+    setBusy(true);
+    try { await onPick(idx); } finally { setBusy(false); setOpen(false); }
+  }
+
+  function toggle() {
+    if (!open) computePos();
+    setOpen(o => !o);
+  }
+
+  const menu = open && pos && (
+    <div
+      ref={menuRef}
+      style={{ position: "fixed", top: pos.top, right: pos.right, width: MENU_W, zIndex: 60 }}
+      className="bg-white border border-gray-200 rounded-lg shadow-lg py-1"
+      onClick={e => e.stopPropagation()}>
+      {Array.from({ length: count }, (_, i) => i + 1).map(n => (
+        <button key={n} onClick={() => pick(n)}
+          className="w-full flex items-center justify-between px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 text-right">
+          <span>Sprint {n}{n === todayCurrent && <span className="text-[9px] text-gray-400 mr-1">· today</span>}</span>
+          {n === current && <Check size={12} className="text-indigo-500" />}
+        </button>
+      ))}
+    </div>
+  );
+
+  return (
+    <>
+      <button ref={triggerRef}
+        onClick={e => { e.stopPropagation(); toggle(); }}
+        onDoubleClick={e => e.stopPropagation()}
+        onContextMenu={e => e.stopPropagation()}
+        className={clsx("inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border transition-colors",
+          current ? "border-gray-200 text-gray-600 hover:border-gray-400"
+                  : "border-dashed border-gray-300 text-gray-400 hover:text-gray-600 hover:border-gray-400")}
+        title={current ? `Sprint ${current} — לחיצה כדי לשנות` : "שייך משימה לספרינט"}>
+        {current ? `S${current}` : "Sprint?"}
         {busy ? <Loader2 size={10} className="animate-spin" /> : <ChevronDown size={10} className="opacity-60" />}
       </button>
       {typeof window !== "undefined" && menu && createPortal(menu, document.body)}
