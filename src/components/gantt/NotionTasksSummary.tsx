@@ -62,6 +62,7 @@ type HotScope = "urgent" | "urgent_high";
 const HOT_SCOPE_KEY = "notionTasks:hotScope";
 const HOT_OPEN_KEY = "notionTasks:hotOpen";
 const PRODUCTION_OPEN_KEY = "notionTasks:productionOpen";
+const PRODUCTION_NOT_DONE_KEY = "notionTasks:productionNotDone";
 
 function readBoolFromStorage(key: string, fallback: boolean): boolean {
   if (typeof window === "undefined") return fallback;
@@ -105,16 +106,23 @@ function isProductionTask(t: NotionTask): boolean {
   return (t.type ?? "").toLowerCase() === "production";
 }
 
+function isDoneStatus(s: string | null): boolean {
+  const v = (s ?? "").toLowerCase();
+  return v === "done" || v === "complete" || v === "approved";
+}
+
 export default function NotionTasksSummary({ pillars }: Props) {
   const router = useRouter();
   const [tasks, setTasks] = useState<NotionTask[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [hotScope, setHotScope] = useState<HotScope>("urgent_high");
+  const [productionNotDone, setProductionNotDone] = useState<boolean>(false);
   const [hydrated, setHydrated] = useState(false);
 
   // Read prefs on mount (client-only)
   useEffect(() => {
     setHotScope(readScopeFromStorage());
+    setProductionNotDone(readBoolFromStorage(PRODUCTION_NOT_DONE_KEY, false));
     setHydrated(true);
   }, []);
 
@@ -123,6 +131,11 @@ export default function NotionTasksSummary({ pillars }: Props) {
     if (!hydrated) return;
     try { localStorage.setItem(HOT_SCOPE_KEY, hotScope); } catch { /* noop */ }
   }, [hydrated, hotScope]);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    try { localStorage.setItem(PRODUCTION_NOT_DONE_KEY, String(productionNotDone)); } catch { /* noop */ }
+  }, [hydrated, productionNotDone]);
 
   // Local mutable copy of the assignment map so optimistic updates show immediately
   const initialMap = useMemo(() => {
@@ -242,8 +255,10 @@ export default function NotionTasksSummary({ pillars }: Props) {
     [tasks, hotScope]
   );
   const production = useMemo(
-    () => (tasks ?? []).filter(isProductionTask).sort(sortByPriority),
-    [tasks]
+    () => (tasks ?? [])
+      .filter(t => isProductionTask(t) && (!productionNotDone || !isDoneStatus(t.status)))
+      .sort(sortByPriority),
+    [tasks, productionNotDone]
   );
 
   return (
@@ -293,6 +308,18 @@ export default function NotionTasksSummary({ pillars }: Props) {
         onAssign={assignTask}
         onAssignSprint={assignSprint}
         storageKey={PRODUCTION_OPEN_KEY}
+        toolbar={
+          <label
+            onClick={e => e.stopPropagation()}
+            className="flex items-center gap-1.5 text-[11px] text-gray-500 hover:text-gray-800 cursor-pointer select-none px-2 py-1 rounded-md hover:bg-gray-50 transition-colors"
+            title="הסתר משימות שכבר Done / Complete / Approved">
+            <input type="checkbox"
+              checked={productionNotDone}
+              onChange={e => setProductionNotDone(e.target.checked)}
+              className="w-3.5 h-3.5 accent-indigo-600 cursor-pointer" />
+            <span>Not done</span>
+          </label>
+        }
       />
     </div>
   );
