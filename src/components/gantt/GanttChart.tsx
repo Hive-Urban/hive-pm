@@ -6,7 +6,7 @@ import { ChevronRight, ChevronDown, ChevronsUpDown, ChevronsDownUp, Plus, Minus,
 import clsx from "clsx";
 import { loadNotionMetaMap } from "@/lib/notion-id-map";
 import PillarMenu from "@/components/PillarMenu";
-import { explicitSprintIndex, currentSprintIndex, isSprintCleared, progressOverride } from "@/lib/sprints";
+import { explicitSprintIndex, currentSprintIndex, isSprintCleared, progressOverride, sprintIndexAt } from "@/lib/sprints";
 
 type Task = {
   id: string;
@@ -139,11 +139,18 @@ function buildSprints(count: number): Sprint[] {
 // sprint (the one whose date range contains today). This way future
 // sprints stay empty unless the user explicitly drops tasks into them.
 function sprintForTask(task: Task, sprints: Sprint[], now: Date = new Date()): Sprint | null {
-  // Tasks that were explicitly cleared from a sprint stay hidden (no
-  // fallback to current). Truly untagged tasks fall back to current.
+  // Tasks that were explicitly cleared from a sprint stay hidden.
   if (isSprintCleared(task.tags ?? null)) return null;
   let idx = explicitSprintIndex(task.tags ?? null);
-  if (idx == null) idx = currentSprintIndex(sprints.length, now);
+  if (idx == null) {
+    // No explicit tag → anchor to the sprint that was current at the task's
+    // creation time, NOT today. Without this, untagged tasks "migrate"
+    // forward as time passes, ending up in whichever sprint happens to be
+    // current — even though they were planned in a much earlier sprint.
+    const created = task.created_at ? new Date(task.created_at) : null;
+    const reference = (created && !Number.isNaN(created.getTime())) ? created : now;
+    idx = sprintIndexAt(reference, sprints.length);
+  }
   return sprints.find(s => s.index === idx) ?? null;
 }
 
@@ -1030,7 +1037,12 @@ function TaskRow({ task, sprints, allSprintsCount, totalWeeks, labelWidth, pilla
 
   const barColor = pillarColor && pillarColor.startsWith("#") ? pillarColor : "#6366f1";
   const tag = task.tags?.find(t => !t.includes(":"));
-  const taskSprintIdx = explicitSprintIndex(task.tags ?? null) ?? currentSprintIndex(sprints.length, now);
+  const taskSprintIdx = explicitSprintIndex(task.tags ?? null) ?? (() => {
+    // Same anchor-to-creation-time logic as sprintForTask — keep the chip
+    // consistent with the row's actual placement on the chart.
+    const c = task.created_at ? new Date(task.created_at) : null;
+    return sprintIndexAt((c && !Number.isNaN(c.getTime())) ? c : now, sprints.length);
+  })();
 
   return (
     <div
