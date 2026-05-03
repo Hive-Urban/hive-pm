@@ -467,16 +467,14 @@ export default function GanttChart({ pillars }: Props) {
 
   const totalWeeks = shownSprints.length * 2;
 
-  const currentSprint = useMemo(() => {
-    return allSprints.find(s => now >= s.start && now < s.end) ?? allSprints[0] ?? null;
-  }, [allSprints, now]);
-
-  // Build a virtual "Others" pillar from Notion completions during the active sprint
-  // window (sprint.start - 2d .. now), only for tasks not yet assigned to a pillar.
+  // Build a virtual "Others" pillar from Notion completions across past +
+  // current sprints (no future — by definition nothing has happened yet).
+  // Each synthetic task carries its real `created_at`, so sprintForTask
+  // places it under the correct sprint via the creation-time anchor.
   const [othersPillar, setOthersPillar] = useState<Pillar | null>(null);
 
   useEffect(() => {
-    if (!currentSprint) return;
+    if (allSprints.length === 0) return;
     let cancelled = false;
     const assigned = new Set<string>();
     for (const p of pillars) {
@@ -494,8 +492,11 @@ export default function GanttChart({ pillars }: Props) {
           page_url: string; type: string | null; due_date: string | null;
           created_at?: string | null; notion_id?: number | null;
         }> = data.tasks ?? [];
-        const windowStart = addDays(currentSprint.start, -2);
-        const today = now;
+        // Window covers from the very first sprint start (-2d grace) through
+        // "today" (real or debug). Future sprints are excluded — by
+        // definition there's nothing completed there yet.
+        const windowStart = addDays(allSprints[0].start, -2);
+        const windowEnd = now;
         const filtered = tasks.filter(t => {
           if (assigned.has(t.id)) return false;
           const s = (t.status ?? "").toLowerCase();
@@ -504,13 +505,18 @@ export default function GanttChart({ pillars }: Props) {
           if (!t.created_at) return false;
           const created = new Date(t.created_at);
           if (Number.isNaN(created.getTime())) return false;
-          return created >= windowStart && created <= today;
+          return created >= windowStart && created <= windowEnd;
         });
         if (filtered.length === 0) { setOthersPillar(null); return; }
         const synthesized: Task[] = filtered.map(t => {
           const tags: string[] = [];
           if (t.type) tags.push(t.type);
           if ((t.status ?? "").toLowerCase() === "approved") tags.push("notion:approved");
+          // Due date defaults to the end of the sprint that contains
+          // creation time, so the bar lands inside the right sprint column.
+          const created = new Date(t.created_at!);
+          const sIdx = sprintIndexAt(created, allSprints.length);
+          const matchingSprint = allSprints.find(s => s.index === sIdx) ?? allSprints[0];
           return {
             id: `others:${t.id}`,
             title: t.name,
@@ -520,7 +526,7 @@ export default function GanttChart({ pillars }: Props) {
             notion_page_id: t.id,
             product: t.product,
             tags,
-            due_date: currentSprint.end.toISOString(),
+            due_date: matchingSprint.end.toISOString(),
             created_at: t.created_at ?? null,
           };
         });
@@ -534,16 +540,18 @@ export default function GanttChart({ pillars }: Props) {
       })
       .catch(() => { /* swallow */ });
     return () => { cancelled = true; };
-  }, [currentSprint, pillars, now]);
+  }, [allSprints, pillars, now]);
 
   const allPillars = useMemo<Pillar[]>(() => {
-    // Others is current-sprint-only by definition (it shows recent
-    // unplanned completions). Hide it entirely if the current sprint
-    // isn't visible.
-    const currentIdx = currentSprintIndex(allSprints.length, now);
-    const includeOthers = othersPillar && visibleSprints.has(currentIdx);
-    return includeOthers ? [...pillars, othersPillar!] : pillars;
-  }, [pillars, othersPillar, allSprints.length, visibleSprints, now]);
+    // Show Others whenever any of its synthesized tasks belongs to a sprint
+    // currently visible — that way past sprints get their Others bucket too.
+    if (!othersPillar) return pillars;
+    const hasVisibleTask = (othersPillar.tasks ?? []).some(t => {
+      const sprint = sprintForTask(t, allSprints, now);
+      return sprint != null && visibleSprints.has(sprint.index);
+    });
+    return hasVisibleTask ? [...pillars, othersPillar] : pillars;
+  }, [pillars, othersPillar, allSprints, visibleSprints, now]);
 
   // 1) Filter each pillar's tasks to those whose assigned sprint is currently
   //    visible. Tasks without an explicit sprint:N tag fall back to current.
