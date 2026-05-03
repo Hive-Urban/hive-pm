@@ -594,25 +594,28 @@ export default function GanttChart({ pillars }: Props) {
     });
   }, [allPillars, allSprints, visibleSprints, normalized, sortBy, notionIdMap, now]);
 
-  // Completion % per sprint (across all pillars' tasks that belong to that sprint)
+  // Completion % per sprint — weighted average across pillars where each
+  // task from a real pillar contributes weight 1, but Others-pillar tasks
+  // contribute weight 1/3 (they represent unplanned/auto-collected work and
+  // shouldn't dominate the sprint metric just by volume).
+  const OTHERS_TASK_WEIGHT = 1 / 3;
   const sprintCompletion = useMemo(() => {
     const map = new Map<number, number>();
     for (const s of allSprints) {
-      const tasksInSprint: Task[] = [];
+      let weightedSum = 0;
+      let weightTotal = 0;
       for (const p of displayPillars) {
+        const pillarWeight = p.id === "__others__" ? OTHERS_TASK_WEIGHT : 1;
         for (const t of p.tasks ?? []) {
-          if (sprintForTask(t, allSprints, now)?.index === s.index) tasksInSprint.push(t);
+          if (sprintForTask(t, allSprints, now)?.index !== s.index) continue;
+          weightedSum += taskCompletion(t) * pillarWeight;
+          weightTotal += pillarWeight;
         }
       }
-      if (tasksInSprint.length === 0) {
-        map.set(s.index, 0);
-      } else {
-        const sum = tasksInSprint.reduce((acc, t) => acc + taskCompletion(t), 0);
-        map.set(s.index, sum / tasksInSprint.length);
-      }
+      map.set(s.index, weightTotal === 0 ? 0 : weightedSum / weightTotal);
     }
     return map;
-  }, [allSprints, displayPillars]);
+  }, [allSprints, displayPillars, now]);
 
   function toggleSprint(idx: number) {
     setVisibleSprints(prev => {
