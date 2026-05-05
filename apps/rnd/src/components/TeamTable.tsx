@@ -357,8 +357,11 @@ export default function TeamTable({ members, skills, repos }: {
             const done = memberTasks?.done ?? [];
             const memberChecks = checksByMember.get(m.id) ?? new Set<string>();
             const checkedActive = active.filter(t => memberChecks.has(t.id));
-            // Compact "primary" task: prefer a checked one, else first.
-            const primary = checkedActive[0] ?? active[0] ?? null;
+            // Compact view shows only the checked-on task (the one the
+            // member explicitly clicked "I'm working on this"). Mere
+            // assignment in Notion is not enough — expand the row to see
+            // and check those.
+            const primary = checkedActive[0] ?? null;
             const isExpanded = expanded.has(m.id);
             const status = workStatus[m.id];
             const isWorking = !!status?.active;
@@ -405,7 +408,11 @@ export default function TeamTable({ members, skills, repos }: {
                     ) : taskError ? (
                       <span className="text-[11px] text-red-500">err</span>
                     ) : !primary ? (
-                      <span className="text-[11px] text-gray-300 italic">no current tasks</span>
+                      <span className="text-[11px] text-gray-300 italic">
+                        {active.length > 0
+                          ? `${active.length} assigned · expand to check`
+                          : "no current tasks"}
+                      </span>
                     ) : (
                       <CompactTaskRow
                         memberId={m.id}
@@ -415,13 +422,15 @@ export default function TeamTable({ members, skills, repos }: {
                         onCheck={() => check(m.id, primary)}
                         onUncheck={() => uncheck(m.id, primary.id)}
                         suffix={
-                          active.length > 1 ? (
-                            <span className="text-[10px] text-gray-400 ml-1">
-                              +{active.length - 1} more · {done.length} done
+                          checkedActive.length > 1 ? (
+                            <span className="text-[10px] text-emerald-600 ml-1">
+                              +{checkedActive.length - 1} more checked · {active.length} assigned · {done.length} done
                             </span>
-                          ) : done.length > 0 ? (
-                            <span className="text-[10px] text-gray-400 ml-1">{done.length} done</span>
-                          ) : null
+                          ) : (
+                            <span className="text-[10px] text-gray-400 ml-1">
+                              {active.length} assigned · {done.length} done
+                            </span>
+                          )
                         }
                       />
                     )}
