@@ -1,6 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 
+// Supabase errors are PostgrestError plain objects, not JS Error instances —
+// `err.message` alone hides the actual cause behind 'unknown error'. This
+// helper extracts a readable string from anything we might catch.
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object") {
+    const e = err as { message?: string; details?: string; hint?: string; code?: string };
+    const parts = [e.message, e.details, e.hint, e.code ? `(code ${e.code})` : null].filter(Boolean);
+    if (parts.length > 0) return parts.join(" · ");
+    try { return JSON.stringify(err); } catch { /* noop */ }
+  }
+  return "unknown error";
+}
+
 // GET /api/task-checks?member_id=...
 // Returns currently-open checks for one member (or all members if no filter).
 export async function GET(req: NextRequest) {
@@ -16,7 +30,8 @@ export async function GET(req: NextRequest) {
     if (error) throw error;
     return NextResponse.json({ items: data ?? [] });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "unknown error";
+    const msg = describeError(err);
+    console.error("task-checks GET error:", err);
     return NextResponse.json({ items: [], error: msg }, { status: 500 });
   }
 }
@@ -60,7 +75,8 @@ export async function POST(req: NextRequest) {
     }
     return NextResponse.json({ ok: true, check: data });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "unknown error";
+    const msg = describeError(err);
+    console.error("task-checks POST error:", err);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
@@ -85,7 +101,8 @@ export async function DELETE(req: NextRequest) {
     if (error) throw error;
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "unknown error";
+    const msg = describeError(err);
+    console.error("task-checks DELETE error:", err);
     return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

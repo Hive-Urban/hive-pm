@@ -254,25 +254,43 @@ export default function TeamTable({ members, skills, repos }: {
   }
   async function check(memberId: string, t: NotionTask) {
     setBusy(`check:${memberId}:${t.id}`);
-    await fetch("/api/task-checks", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        member_id: memberId,
-        notion_page_id: t.id,
-        notion_id: t.notion_id,
-        notion_name: t.name,
-      }),
-    }).catch(() => {});
-    refreshLocal();
+    setActionError(null);
+    try {
+      const res = await fetch("/api/task-checks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          member_id: memberId,
+          notion_page_id: t.id,
+          notion_id: t.notion_id,
+          notion_name: t.name,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error ?? `HTTP ${res.status}`);
+      }
+    } catch (err) {
+      setActionError(`Check failed: ${err instanceof Error ? err.message : "unknown"}`);
+    }
+    await refreshLocal();
     setBusy(null);
   }
   async function uncheck(memberId: string, pageId: string) {
     setBusy(`uncheck:${memberId}:${pageId}`);
-    await fetch(`/api/task-checks?member_id=${memberId}&notion_page_id=${encodeURIComponent(pageId)}`, {
-      method: "DELETE",
-    }).catch(() => {});
-    refreshLocal();
+    setActionError(null);
+    try {
+      const res = await fetch(`/api/task-checks?member_id=${memberId}&notion_page_id=${encodeURIComponent(pageId)}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error ?? `HTTP ${res.status}`);
+      }
+    } catch (err) {
+      setActionError(`Uncheck failed: ${err instanceof Error ? err.message : "unknown"}`);
+    }
+    await refreshLocal();
     setBusy(null);
   }
 
