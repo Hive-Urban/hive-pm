@@ -281,10 +281,10 @@ export default function TeamTable({ members, skills, repos }: {
             const status = workStatus[m.id];
             const isWorking = !!status?.active;
 
-            const dotColor = !isWorking ? "bg-gray-300"
-              : checkedActive.length === 0 ? "bg-amber-400"   // working but nothing checked
-              : checkedActive.length <= 2 ? "bg-emerald-500"
-              : "bg-red-500";
+            // Dot next to the name signals clock-in status only.
+            // The per-task green CheckCircle next to a Notion task is the
+            // separate "this is what I'm actively working on" signal.
+            const dotColor = isWorking ? "bg-emerald-500" : "bg-gray-300";
 
             const topSkills = (m.rnd_member_skills ?? [])
               .slice().sort((a, b) => b.level - a.level).slice(0, 4);
