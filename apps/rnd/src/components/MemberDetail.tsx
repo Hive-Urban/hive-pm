@@ -1,9 +1,9 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
-import { ArrowLeft, ExternalLink, Loader2, Save } from "lucide-react";
+import { ArrowLeft, ExternalLink, Loader2, Save, CheckCircle2, Circle, LogIn, LogOut, Clock } from "lucide-react";
 
 type MemberSkill = { skill_id: string; level: number; notes: string | null };
 type MemberRepo = { repo_id: string; role: string | null; started_at: string | null; ended_at: string | null };
@@ -65,18 +65,82 @@ export default function MemberDetail({ member, skills, categories, repos }: {
 
   // Live Notion task lookup keyed off full_name (matches Notion `Assigned to`).
   const [tasks, setTasks] = useState<{ active: NotionTask[]; done: NotionTask[] } | null>(null);
-  useEffect(() => {
-    let cancelled = false;
+  const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [workActive, setWorkActive] = useState<boolean>(false);
+  const [workStartedAt, setWorkStartedAt] = useState<string | null>(null);
+  const [autoEndHour, setAutoEndHour] = useState(20);
+  const [taskBusyId, setTaskBusyId] = useState<string | null>(null);
+  const [clockBusy, setClockBusy] = useState(false);
+
+  const loadStatus = useCallback(() => {
     fetch("/api/notion-tasks-by-member")
       .then(r => r.json())
       .then(data => {
-        if (cancelled) return;
         const bucket = data.byAssignee?.[member.full_name];
         setTasks(bucket ?? { active: [], done: [] });
       })
-      .catch(() => { if (!cancelled) setTasks({ active: [], done: [] }); });
-    return () => { cancelled = true; };
-  }, [member.full_name]);
+      .catch(() => setTasks({ active: [], done: [] }));
+    fetch(`/api/task-checks?member_id=${member.id}`)
+      .then(r => r.json())
+      .then(data => {
+        const ids = new Set<string>((data.items ?? []).map((c: { notion_page_id: string }) => c.notion_page_id));
+        setCheckedIds(ids);
+      });
+    fetch("/api/work-sessions")
+      .then(r => r.json())
+      .then(data => {
+        const status = data.byMember?.[member.id];
+        setWorkActive(!!status?.active);
+        setWorkStartedAt(status?.started_at ?? null);
+        if (data.autoEndHour) setAutoEndHour(data.autoEndHour);
+      });
+  }, [member.full_name, member.id]);
+
+  useEffect(() => { loadStatus(); }, [loadStatus]);
+
+  async function toggleCheck(t: NotionTask) {
+    setTaskBusyId(t.id);
+    const isChecked = checkedIds.has(t.id);
+    if (isChecked) {
+      await fetch(`/api/task-checks?member_id=${member.id}&notion_page_id=${encodeURIComponent(t.id)}`, {
+        method: "DELETE",
+      }).catch(() => {});
+    } else {
+      await fetch("/api/task-checks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          member_id: member.id,
+          notion_page_id: t.id,
+          notion_id: t.notion_id,
+          notion_name: t.name,
+        }),
+      }).catch(() => {});
+    }
+    loadStatus();
+    setTaskBusyId(null);
+  }
+
+  async function clockIn() {
+    setClockBusy(true);
+    await fetch("/api/work-sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ member_id: member.id }),
+    }).catch(() => {});
+    loadStatus();
+    setClockBusy(false);
+  }
+  async function clockOut() {
+    setClockBusy(true);
+    await fetch("/api/work-sessions", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ member_id: member.id }),
+    }).catch(() => {});
+    loadStatus();
+    setClockBusy(false);
+  }
 
   const skillsByCategory = useMemo(() => {
     const map = new Map<string, Skill[]>();
@@ -152,22 +216,49 @@ export default function MemberDetail({ member, skills, categories, repos }: {
       </Link>
 
       <header className="bg-white border border-gray-200 rounded-2xl p-6 mb-6 shadow-sm">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">@{member.handle}</h1>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className={clsx("w-2.5 h-2.5 rounded-full shrink-0", workActive ? "bg-emerald-500" : "bg-gray-300")}
+                title={workActive ? `Clocked in at ${formatHM(workStartedAt)}` : "Not clocked in"} />
+              <h1 className="text-2xl font-bold text-gray-900">@{member.handle}</h1>
+            </div>
             <p className="text-sm text-gray-500 mt-1">{member.full_name} · {member.email}</p>
             {member.role && <p className="text-sm text-gray-700 mt-1">{member.role}</p>}
-            {member.is_admin && (
-              <span className="inline-flex mt-2 text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
-                Admin
-              </span>
-            )}
+            <div className="flex items-center gap-2 mt-2">
+              {member.is_admin && (
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                  Admin
+                </span>
+              )}
+              {workActive && workStartedAt && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700">
+                  <Clock size={11} /> Working since {formatHM(workStartedAt)}
+                  <span className="text-gray-400">· auto-out at {String(autoEndHour).padStart(2, "0")}:00</span>
+                </span>
+              )}
+            </div>
           </div>
-          <button onClick={save} disabled={busy}
-            className="inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">
-            {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            Save changes
-          </button>
+          <div className="flex items-center gap-2">
+            {workActive ? (
+              <button onClick={clockOut} disabled={clockBusy}
+                className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
+                {clockBusy ? <Loader2 size={14} className="animate-spin" /> : <LogOut size={14} />}
+                Clock out
+              </button>
+            ) : (
+              <button onClick={clockIn} disabled={clockBusy}
+                className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-gray-200 text-gray-700 hover:border-emerald-400 hover:text-emerald-700 disabled:opacity-50">
+                {clockBusy ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
+                Clock in
+              </button>
+            )}
+            <button onClick={save} disabled={busy}
+              className="inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">
+              {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+              Save changes
+            </button>
+          </div>
         </div>
         {saved && <p className="text-xs text-emerald-700 mt-3">{saved}</p>}
       </header>
@@ -181,22 +272,48 @@ export default function MemberDetail({ member, skills, categories, repos }: {
         ) : (
           <div className="grid md:grid-cols-2 gap-6">
             <div>
-              <h3 className="text-xs font-semibold text-gray-700 mb-2">Active ({tasks.active.length})</h3>
+              <h3 className="text-xs font-semibold text-gray-700 mb-2">
+                Active ({tasks.active.length})
+                {checkedIds.size > 0 && <span className="text-emerald-600 font-normal ml-1">· {checkedIds.size} checked</span>}
+              </h3>
+              <p className="text-[10px] text-gray-400 mb-2">Check the tasks you&apos;re currently working on.</p>
               {tasks.active.length === 0
                 ? <p className="text-xs text-gray-400 italic">No active tasks.</p>
                 : (
                   <ul className="space-y-1">
-                    {tasks.active.map(t => (
-                      <li key={t.id}>
-                        <a href={t.page_url} target="_blank" rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 text-[13px] text-gray-700 hover:text-indigo-700">
-                          {t.notion_id != null && <span className="text-[10px] font-mono text-gray-400 tabular-nums shrink-0">#{t.notion_id}</span>}
-                          <span className="flex-1 truncate">{t.name}</span>
-                          {t.status && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 shrink-0">{t.status}</span>}
-                          <ExternalLink size={10} className="text-gray-300 shrink-0" />
-                        </a>
-                      </li>
-                    ))}
+                    {tasks.active.map(t => {
+                      const isChecked = checkedIds.has(t.id);
+                      const itemBusy = taskBusyId === t.id;
+                      return (
+                        <li key={t.id} className="flex items-center gap-2">
+                          <button onClick={() => toggleCheck(t)}
+                            disabled={itemBusy}
+                            title={isChecked ? "Stop working" : "I'm working on this"}
+                            className="text-gray-400 hover:text-emerald-600 disabled:opacity-50 shrink-0">
+                            {itemBusy
+                              ? <Loader2 size={14} className="animate-spin" />
+                              : isChecked
+                                ? <CheckCircle2 size={14} className="text-emerald-500" />
+                                : <Circle size={14} />}
+                          </button>
+                          <a href={t.page_url} target="_blank" rel="noopener noreferrer"
+                            className={clsx(
+                              "flex items-center gap-1.5 text-[13px] hover:text-indigo-700 flex-1 min-w-0",
+                              isChecked ? "text-emerald-700 font-medium" : "text-gray-700"
+                            )}>
+                            {t.notion_id != null && (
+                              <span className={clsx(
+                                "text-[10px] font-mono tabular-nums shrink-0",
+                                isChecked ? "text-emerald-500" : "text-gray-400"
+                              )}>#{t.notion_id}</span>
+                            )}
+                            <span className="flex-1 truncate">{t.name}</span>
+                            {t.status && <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 shrink-0">{t.status}</span>}
+                            <ExternalLink size={10} className="text-gray-300 shrink-0" />
+                          </a>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
             </div>
@@ -303,4 +420,11 @@ export default function MemberDetail({ member, skills, categories, repos }: {
       </section>
     </div>
   );
+}
+
+function formatHM(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
