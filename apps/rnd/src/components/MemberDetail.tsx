@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import clsx from "clsx";
-import { ArrowLeft, ExternalLink, Loader2, Save, CheckCircle2, Circle, LogIn, LogOut, Clock, TrendingUp, Plus, Minus, ArrowUpRight, ArrowDownRight, FolderPlus, FolderMinus } from "lucide-react";
+import { ArrowLeft, ExternalLink, Loader2, Save, CheckCircle2, Circle, LogIn, LogOut, Clock, TrendingUp, Plus, Minus, ArrowUpRight, ArrowDownRight, FolderPlus, FolderMinus, X } from "lucide-react";
 
 type MemberSkill = { skill_id: string; level: number; notes: string | null };
 type MemberRepo = { repo_id: string; role: string | null; started_at: string | null; ended_at: string | null };
@@ -394,41 +394,44 @@ export default function MemberDetail({ member, skills, categories, repos }: {
         <div className="space-y-5">
           {categories.map(cat => {
             const catSkills = skillsByCategory.get(cat.id) ?? [];
-            if (catSkills.length === 0) return null;
             return (
               <div key={cat.id}>
                 <div className="flex items-center gap-2 mb-2">
                   {cat.color && <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: cat.color }} />}
                   <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-500">{cat.name}</h3>
                 </div>
-                <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2">
-                  {catSkills.map(s => {
-                    const current = skillLevels.get(s.id) ?? 0;
-                    return (
-                      <div key={s.id} className="flex items-center gap-2">
-                        <span className="flex-1 text-sm text-gray-700 truncate">{s.name}</span>
-                        <div className="flex items-center gap-0.5">
-                          {LEVELS.map(lvl => (
-                            <button key={lvl}
-                              onClick={() => setLevel(s.id, lvl)}
-                              title={LEVEL_LABEL[lvl]}
-                              className={clsx(
-                                "w-6 h-6 text-[11px] rounded transition-colors tabular-nums",
-                                lvl === current
-                                  ? "bg-indigo-600 text-white font-semibold"
-                                  : "bg-gray-100 text-gray-500 hover:bg-gray-200"
-                              )}>
-                              {lvl === 0 ? "—" : lvl}
-                            </button>
-                          ))}
+                {catSkills.length > 0 && (
+                  <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-2 mb-2">
+                    {catSkills.map(s => {
+                      const current = skillLevels.get(s.id) ?? 0;
+                      return (
+                        <div key={s.id} className="flex items-center gap-2">
+                          <span className="flex-1 text-sm text-gray-700 truncate">{s.name}</span>
+                          <div className="flex items-center gap-0.5">
+                            {LEVELS.map(lvl => (
+                              <button key={lvl}
+                                onClick={() => setLevel(s.id, lvl)}
+                                title={LEVEL_LABEL[lvl]}
+                                className={clsx(
+                                  "w-6 h-6 text-[11px] rounded transition-colors tabular-nums",
+                                  lvl === current
+                                    ? "bg-indigo-600 text-white font-semibold"
+                                    : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                                )}>
+                                {lvl === 0 ? "—" : lvl}
+                              </button>
+                            ))}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <AddSkillInline categoryId={cat.id} categoryName={cat.name} onAdded={() => router.refresh()} />
               </div>
             );
           })}
+          <AddCategoryInline onAdded={() => router.refresh()} />
         </div>
       </section>
 
@@ -457,6 +460,7 @@ export default function MemberDetail({ member, skills, categories, repos }: {
               </label>
             );
           })}
+          <AddRepoInline onAdded={() => router.refresh()} />
         </div>
       </section>
 
@@ -586,4 +590,204 @@ function formatHM(iso: string | null): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "—";
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// Self-service "+ Add skill" form, scoped to a category. Anyone can add
+// to the global skill list — keeps the catalog growing organically
+// without forcing every new tech through admin.
+function AddSkillInline({ categoryId, categoryName, onAdded }: {
+  categoryId: string;
+  categoryName: string;
+  onAdded: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const res = await fetch("/api/skills", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed, category_id: categoryId, order_index: 999 }),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e?.error ?? `HTTP ${res.status}`);
+      }
+      setName(""); setOpen(false); onAdded();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "unknown");
+    } finally { setBusy(false); }
+  }
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)}
+        className="inline-flex items-center gap-1 text-[11px] text-indigo-600 hover:text-indigo-800 mt-1">
+        <Plus size={11} /> Add {categoryName} skill
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 mt-2">
+      <input
+        autoFocus
+        value={name}
+        onChange={e => setName(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === "Enter") { e.preventDefault(); void save(); }
+          if (e.key === "Escape") { e.preventDefault(); setOpen(false); setName(""); setErr(null); }
+        }}
+        placeholder={`New ${categoryName} skill name`}
+        className="flex-1 max-w-xs px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:border-indigo-400"
+      />
+      <button onClick={() => void save()} disabled={busy || !name.trim()}
+        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
+        {busy ? <Loader2 size={10} className="animate-spin" /> : <Plus size={10} />} Add
+      </button>
+      <button onClick={() => { setOpen(false); setName(""); setErr(null); }}
+        disabled={busy}
+        className="text-gray-400 hover:text-gray-700 disabled:opacity-50">
+        <X size={12} />
+      </button>
+      {err && <span className="text-[10px] text-red-600">{err}</span>}
+    </div>
+  );
+}
+
+// Self-service "+ Add category" form. Catalog-wide.
+function AddCategoryInline({ onAdded }: { onAdded: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch("/api/skill-categories", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed, order_index: 999 }),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e?.error ?? `HTTP ${res.status}`);
+      }
+      setName(""); setOpen(false); onAdded();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "unknown");
+    } finally { setBusy(false); }
+  }
+
+  if (!open) {
+    return (
+      <div className="pt-2 border-t border-gray-100">
+        <button onClick={() => setOpen(true)}
+          className="inline-flex items-center gap-1 text-[12px] text-gray-500 hover:text-indigo-700">
+          <Plus size={12} /> Add new skill category
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="pt-2 border-t border-gray-100">
+      <div className="flex items-center gap-2">
+        <input
+          autoFocus
+          value={name}
+          onChange={e => setName(e.target.value)}
+          onKeyDown={e => {
+            if (e.key === "Enter") { e.preventDefault(); void save(); }
+            if (e.key === "Escape") { e.preventDefault(); setOpen(false); setName(""); setErr(null); }
+          }}
+          placeholder="New category (e.g. Mobile, Security)"
+          className="flex-1 max-w-xs px-2 py-1 text-sm border border-gray-200 rounded focus:outline-none focus:border-indigo-400"
+        />
+        <button onClick={() => void save()} disabled={busy || !name.trim()}
+          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
+          {busy ? <Loader2 size={10} className="animate-spin" /> : <Plus size={10} />} Add
+        </button>
+        <button onClick={() => { setOpen(false); setName(""); setErr(null); }}
+          disabled={busy}
+          className="text-gray-400 hover:text-gray-700 disabled:opacity-50">
+          <X size={12} />
+        </button>
+        {err && <span className="text-[10px] text-red-600">{err}</span>}
+      </div>
+    </div>
+  );
+}
+
+// Self-service "+ Add repo" inline tile inside the repos grid. Slug is
+// derived from name (lowercased, hyphenated). Status defaults to active.
+function AddRepoInline({ onAdded }: { onAdded: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    const slug = trimmed.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    if (!slug) { setErr("Couldn't derive a slug from that name."); return; }
+    setBusy(true); setErr(null);
+    try {
+      const res = await fetch("/api/repos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: trimmed, slug, status: "active", order_index: 999 }),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e?.error ?? `HTTP ${res.status}`);
+      }
+      setName(""); setOpen(false); onAdded();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "unknown");
+    } finally { setBusy(false); }
+  }
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)}
+        className="flex items-center justify-center gap-1 px-3 py-2 rounded-lg border border-dashed border-gray-300 text-gray-500 hover:border-indigo-400 hover:text-indigo-700 text-sm">
+        <Plus size={13} /> Add repo
+      </button>
+    );
+  }
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-indigo-200 bg-indigo-50/40">
+      <input
+        autoFocus
+        value={name}
+        onChange={e => setName(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === "Enter") { e.preventDefault(); void save(); }
+          if (e.key === "Escape") { e.preventDefault(); setOpen(false); setName(""); setErr(null); }
+        }}
+        placeholder="New repo name"
+        className="flex-1 min-w-0 px-2 py-1 text-sm bg-white border border-gray-200 rounded focus:outline-none focus:border-indigo-400"
+      />
+      <button onClick={() => void save()} disabled={busy || !name.trim()}
+        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 shrink-0">
+        {busy ? <Loader2 size={10} className="animate-spin" /> : <Plus size={10} />} Add
+      </button>
+      <button onClick={() => { setOpen(false); setName(""); setErr(null); }}
+        disabled={busy}
+        className="text-gray-400 hover:text-gray-700 disabled:opacity-50 shrink-0">
+        <X size={12} />
+      </button>
+      {err && <span className="text-[10px] text-red-600 ml-1 shrink-0">{err}</span>}
+    </div>
+  );
 }
