@@ -108,24 +108,31 @@ export default function MemberDetail({ member, skills, categories, repos }: {
 
   useEffect(() => { loadStatus(); }, [loadStatus]);
 
+  const [checkError, setCheckError] = useState<string | null>(null);
+
   async function toggleCheck(t: NotionTask) {
     setTaskBusyId(t.id);
+    setCheckError(null);
     const isChecked = checkedIds.has(t.id);
-    if (isChecked) {
-      await fetch(`/api/task-checks?member_id=${member.id}&notion_page_id=${encodeURIComponent(t.id)}`, {
-        method: "DELETE",
-      }).catch(() => {});
-    } else {
-      await fetch("/api/task-checks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          member_id: member.id,
-          notion_page_id: t.id,
-          notion_id: t.notion_id,
-          notion_name: t.name,
-        }),
-      }).catch(() => {});
+    try {
+      const res = isChecked
+        ? await fetch(`/api/task-checks?member_id=${member.id}&notion_page_id=${encodeURIComponent(t.id)}`, { method: "DELETE" })
+        : await fetch("/api/task-checks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              member_id: member.id,
+              notion_page_id: t.id,
+              notion_id: t.notion_id,
+              notion_name: t.name,
+            }),
+          });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error ?? `HTTP ${res.status}`);
+      }
+    } catch (err) {
+      setCheckError(`${isChecked ? "Uncheck" : "Check"} failed: ${err instanceof Error ? err.message : "unknown"}`);
     }
     loadStatus();
     setTaskBusyId(null);
@@ -287,6 +294,9 @@ export default function MemberDetail({ member, skills, categories, repos }: {
                 {checkedIds.size > 0 && <span className="text-emerald-600 font-normal ml-1">· {checkedIds.size} checked</span>}
               </h3>
               <p className="text-[10px] text-gray-400 mb-2">Check the tasks you&apos;re currently working on.</p>
+              {checkError && (
+                <p className="text-[11px] text-red-600 font-medium mb-2">{checkError}</p>
+              )}
               {tasks.active.length === 0
                 ? <p className="text-xs text-gray-400 italic">No active tasks.</p>
                 : (
