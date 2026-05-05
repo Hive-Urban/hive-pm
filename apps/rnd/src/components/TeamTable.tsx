@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useState, useCallback } from "react";
 import Link from "next/link";
 import clsx from "clsx";
-import { ChevronDown, ChevronRight, ExternalLink, Loader2, CheckCircle2, Circle, Clock, LogIn, LogOut, RefreshCw } from "lucide-react";
+import { ChevronDown, ChevronRight, ExternalLink, Loader2, CheckCircle2, Circle, Clock, LogIn, LogOut, RefreshCw, Sunset } from "lucide-react";
 
 // Cache wrappers — instant first paint from localStorage, fresh fetch in
 // the background. Manual Refresh button forces a re-fetch and updates the
@@ -233,6 +233,24 @@ export default function TeamTable({ members, skills, repos }: {
     await refreshLocal();
     setBusy(null);
   }
+  const [endingDay, setEndingDay] = useState(false);
+  async function endDay() {
+    if (!confirm("Clock out everyone? This closes every open work session for the whole team.")) return;
+    setEndingDay(true);
+    setActionError(null);
+    try {
+      const res = await fetch("/api/work-sessions/end-day", { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err?.error ?? `HTTP ${res.status}`);
+      }
+    } catch (err) {
+      setActionError(`End of day failed: ${err instanceof Error ? err.message : "unknown"}`);
+    }
+    await refreshLocal();
+    setEndingDay(false);
+  }
+
   async function clockOut(memberId: string) {
     setBusy(`clock-out:${memberId}`);
     setActionError(null);
@@ -322,6 +340,20 @@ export default function TeamTable({ members, skills, repos }: {
             ? <Loader2 size={13} className="animate-spin" />
             : <RefreshCw size={13} />}
           {refreshing ? "Refreshing…" : "Refresh"}
+        </button>
+        <button onClick={() => void endDay()}
+          disabled={endingDay}
+          title="Clock out every team member"
+          className={clsx(
+            "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-colors",
+            endingDay
+              ? "border-amber-200 bg-amber-50 text-amber-700"
+              : "border-gray-200 bg-white text-gray-700 hover:border-amber-400 hover:bg-amber-50 hover:text-amber-700"
+          )}>
+          {endingDay
+            ? <Loader2 size={13} className="animate-spin" />
+            : <Sunset size={13} />}
+          {endingDay ? "Ending…" : "End of day"}
         </button>
         {cacheTs != null && (
           <span className="text-[11px] text-gray-400">
