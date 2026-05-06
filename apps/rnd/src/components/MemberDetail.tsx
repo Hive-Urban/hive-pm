@@ -51,11 +51,12 @@ const LEVEL_LABEL: Record<number, string> = {
   0: "—", 1: "Familiar", 2: "Working", 3: "Solid", 4: "Strong", 5: "Expert",
 };
 
-export default function MemberDetail({ member, skills, categories, repos }: {
+export default function MemberDetail({ member, skills, categories, repos, canEdit = true }: {
   member: Member;
   skills: Skill[];
   categories: Category[];
   repos: Repo[];
+  canEdit?: boolean;
 }) {
   const router = useRouter();
   const initialSkillMap = useMemo(() => {
@@ -277,26 +278,30 @@ export default function MemberDetail({ member, skills, categories, repos }: {
               )}
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            {workActive ? (
-              <button onClick={clockOut} disabled={clockBusy}
-                className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
-                {clockBusy ? <Loader2 size={14} className="animate-spin" /> : <LogOut size={14} />}
-                Clock out
+          {canEdit ? (
+            <div className="flex items-center gap-2">
+              {workActive ? (
+                <button onClick={clockOut} disabled={clockBusy}
+                  className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
+                  {clockBusy ? <Loader2 size={14} className="animate-spin" /> : <LogOut size={14} />}
+                  Clock out
+                </button>
+              ) : (
+                <button onClick={clockIn} disabled={clockBusy}
+                  className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-gray-200 text-gray-700 hover:border-emerald-400 hover:text-emerald-700 disabled:opacity-50">
+                  {clockBusy ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
+                  Clock in
+                </button>
+              )}
+              <button onClick={save} disabled={busy}
+                className="inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">
+                {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                Save changes
               </button>
-            ) : (
-              <button onClick={clockIn} disabled={clockBusy}
-                className="inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-lg border border-gray-200 text-gray-700 hover:border-emerald-400 hover:text-emerald-700 disabled:opacity-50">
-                {clockBusy ? <Loader2 size={14} className="animate-spin" /> : <LogIn size={14} />}
-                Clock in
-              </button>
-            )}
-            <button onClick={save} disabled={busy}
-              className="inline-flex items-center gap-1.5 text-sm font-medium px-4 py-2 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50">
-              {busy ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-              Save changes
-            </button>
-          </div>
+            </div>
+          ) : (
+            <span className="text-[11px] text-gray-400 italic">Read-only — admin can edit</span>
+          )}
         </div>
         {saved && <p className="text-xs text-emerald-700 mt-3">{saved}</p>}
       </header>
@@ -327,8 +332,8 @@ export default function MemberDetail({ member, skills, categories, repos }: {
                       const itemBusy = taskBusyId === t.id;
                       return (
                         <li key={t.id} className="flex items-center gap-2">
-                          <button onClick={() => toggleCheck(t)}
-                            disabled={itemBusy}
+                          <button onClick={() => canEdit && toggleCheck(t)}
+                            disabled={itemBusy || !canEdit}
                             title={isChecked ? "Stop working" : "I'm working on this"}
                             className="text-gray-400 hover:text-emerald-600 disabled:opacity-50 shrink-0">
                             {itemBusy
@@ -410,13 +415,15 @@ export default function MemberDetail({ member, skills, categories, repos }: {
                           <div className="flex items-center gap-0.5">
                             {LEVELS.map(lvl => (
                               <button key={lvl}
-                                onClick={() => setLevel(s.id, lvl)}
+                                onClick={() => canEdit && setLevel(s.id, lvl)}
+                                disabled={!canEdit}
                                 title={LEVEL_LABEL[lvl]}
                                 className={clsx(
                                   "w-6 h-6 text-[11px] rounded transition-colors tabular-nums",
                                   lvl === current
-                                    ? "bg-indigo-600 text-white font-semibold"
-                                    : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                                    ? (lvl === 5 ? "bg-emerald-600 text-white font-semibold" : "bg-indigo-600 text-white font-semibold")
+                                    : "bg-gray-100 text-gray-500 hover:bg-gray-200",
+                                  !canEdit && "cursor-default opacity-80 hover:bg-gray-100"
                                 )}>
                                 {lvl === 0 ? "—" : lvl}
                               </button>
@@ -427,11 +434,11 @@ export default function MemberDetail({ member, skills, categories, repos }: {
                     })}
                   </div>
                 )}
-                <AddSkillInline categoryId={cat.id} categoryName={cat.name} onAdded={() => router.refresh()} />
+                {canEdit && <AddSkillInline categoryId={cat.id} categoryName={cat.name} onAdded={() => router.refresh()} />}
               </div>
             );
           })}
-          <AddCategoryInline onAdded={() => router.refresh()} />
+          {canEdit && <AddCategoryInline onAdded={() => router.refresh()} />}
         </div>
       </section>
 
@@ -450,8 +457,9 @@ export default function MemberDetail({ member, skills, categories, repos }: {
                   checked ? "bg-indigo-50 border-indigo-200" : "bg-gray-50 border-gray-200 hover:border-gray-300"
                 )}>
                 <input type="checkbox" checked={checked}
-                  onChange={() => toggleRepo(r.id)}
-                  className="w-4 h-4 accent-indigo-600 cursor-pointer" />
+                  onChange={() => canEdit && toggleRepo(r.id)}
+                  disabled={!canEdit}
+                  className="w-4 h-4 accent-indigo-600 cursor-pointer disabled:cursor-default" />
                 <span className="w-2.5 h-2.5 rounded-sm" style={{ backgroundColor: hex }} />
                 <span className="text-sm text-gray-700 flex-1 truncate">{r.name}</span>
                 {r.status !== "active" && (
@@ -460,7 +468,7 @@ export default function MemberDetail({ member, skills, categories, repos }: {
               </label>
             );
           })}
-          <AddRepoInline onAdded={() => router.refresh()} />
+          {canEdit && <AddRepoInline onAdded={() => router.refresh()} />}
         </div>
       </section>
 

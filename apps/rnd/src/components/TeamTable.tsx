@@ -82,10 +82,12 @@ type WorkStatus = {
   ended_at: string | null;
 };
 
-export default function TeamTable({ members, skills, repos }: {
+export default function TeamTable({ members, skills, repos, viewerId = null, viewerIsAdmin = false }: {
   members: Member[];
   skills: Skill[];
   repos: Repo[];
+  viewerId?: string | null;
+  viewerIsAdmin?: boolean;
 }) {
   const [tasks, setTasks] = useState<ByAssignee | null>(null);
   const [taskError, setTaskError] = useState<string | null>(null);
@@ -203,7 +205,16 @@ export default function TeamTable({ members, skills, repos }: {
       .sort();
   }, [tasks, memberNormNames]);
 
+  function canManage(memberId: string): boolean {
+    return viewerIsAdmin || viewerId === memberId;
+  }
+  function canExpand(memberId: string): boolean {
+    // Admin can expand anyone, regular members only themselves.
+    return canManage(memberId);
+  }
+
   function toggleExpand(memberId: string) {
+    if (!canExpand(memberId)) return;
     setExpanded(prev => {
       const next = new Set(prev);
       if (next.has(memberId)) next.delete(memberId);
@@ -341,7 +352,7 @@ export default function TeamTable({ members, skills, repos }: {
             : <RefreshCw size={13} />}
           {refreshing ? "Refreshing…" : "Refresh"}
         </button>
-        <button onClick={() => void endDay()}
+        {viewerIsAdmin && <button onClick={() => void endDay()}
           disabled={endingDay}
           title="Clock out every team member"
           className={clsx(
@@ -354,7 +365,7 @@ export default function TeamTable({ members, skills, repos }: {
             ? <Loader2 size={13} className="animate-spin" />
             : <Sunset size={13} />}
           {endingDay ? "Ending…" : "End of day"}
-        </button>
+        </button>}
         {cacheTs != null && (
           <span className="text-[11px] text-gray-400">
             Last updated: {formatAge(cacheTs)}
@@ -430,13 +441,17 @@ export default function TeamTable({ members, skills, repos }: {
                 {/* Compact row */}
                 <tr className={clsx("border-t border-gray-100 hover:bg-gray-50/40", isExpanded && "bg-indigo-50/30")}>
                   <td className="px-3 py-3 align-top">
-                    <button onClick={() => toggleExpand(m.id)}
-                      className="text-gray-400 hover:text-gray-700 p-1 -ml-1 rounded hover:bg-gray-100"
-                      title={isExpanded ? "Collapse" : "Expand"}>
-                      {isExpanded
-                        ? <ChevronDown size={14} />
-                        : <ChevronRight size={14} />}
-                    </button>
+                    {canExpand(m.id) ? (
+                      <button onClick={() => toggleExpand(m.id)}
+                        className="text-gray-400 hover:text-gray-700 p-1 -ml-1 rounded hover:bg-gray-100"
+                        title={isExpanded ? "Collapse" : "Expand"}>
+                        {isExpanded
+                          ? <ChevronDown size={14} />
+                          : <ChevronRight size={14} />}
+                      </button>
+                    ) : (
+                      <span className="inline-block w-[22px]" aria-hidden />
+                    )}
                   </td>
                   <td className="px-3 py-3 align-top">
                     <Link href={`/team/${encodeURIComponent(m.handle)}`} className="block group">
@@ -469,8 +484,8 @@ export default function TeamTable({ members, skills, repos }: {
                         task={primary}
                         checked={memberChecks.has(primary.id)}
                         busy={busy === `check:${m.id}:${primary.id}` || busy === `uncheck:${m.id}:${primary.id}`}
-                        onCheck={() => check(m.id, primary)}
-                        onUncheck={() => uncheck(m.id, primary.id)}
+                        onCheck={canManage(m.id) ? () => check(m.id, primary) : null}
+                        onUncheck={canManage(m.id) ? () => uncheck(m.id, primary.id) : null}
                         suffix={
                           checkedActive.length > 1 ? (
                             <span className="text-[10px] text-emerald-600 ml-1">
@@ -486,47 +501,73 @@ export default function TeamTable({ members, skills, repos }: {
                     )}
                   </td>
                   <td className="px-3 py-3 align-top">
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex items-center gap-1 overflow-hidden">
                       {topSkills.length === 0 ? (
                         <span className="text-[10px] text-gray-300 italic">—</span>
-                      ) : topSkills.map(s => {
-                        const skill = skillById.get(s.skill_id);
-                        if (!skill) return null;
-                        return (
-                          <span key={s.skill_id}
-                            className={clsx(
-                              "text-[10px] px-1.5 py-0.5 rounded border tabular-nums",
-                              s.level === 5 ? "bg-violet-50 text-violet-700 border-violet-200"
-                                : s.level === 4 ? "bg-indigo-50 text-indigo-700 border-indigo-200"
-                                : "bg-gray-50 text-gray-600 border-gray-200"
-                            )}
-                            title={`Level ${s.level}/5`}>
-                            {skill.name} · {s.level}
-                          </span>
-                        );
-                      })}
+                      ) : (() => {
+                        const visible = topSkills.slice(0, 3);
+                        const hidden = topSkills.length - visible.length;
+                        return (<>
+                          {visible.map(s => {
+                            const skill = skillById.get(s.skill_id);
+                            if (!skill) return null;
+                            return (
+                              <span key={s.skill_id}
+                                className={clsx(
+                                  "text-[10px] px-1.5 py-0.5 rounded border tabular-nums whitespace-nowrap shrink-0",
+                                  s.level === 5 ? "bg-emerald-100 text-emerald-800 border-emerald-300 font-semibold"
+                                    : s.level === 4 ? "bg-indigo-50 text-indigo-700 border-indigo-200"
+                                    : "bg-gray-50 text-gray-600 border-gray-200"
+                                )}
+                                title={`Level ${s.level}/5`}>
+                                {skill.name} · {s.level}
+                              </span>
+                            );
+                          })}
+                          {hidden > 0 && (
+                            <span className="text-[10px] text-gray-400 shrink-0">+{hidden}</span>
+                          )}
+                        </>);
+                      })()}
                     </div>
                   </td>
                   <td className="px-3 py-3 align-top">
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex items-center gap-1 overflow-hidden">
                       {memberRepos.length === 0 ? (
                         <span className="text-[10px] text-gray-300 italic">—</span>
-                      ) : memberRepos.map(r => {
-                        const repo = repoById.get(r.repo_id);
-                        if (!repo) return null;
-                        const hex = repo.color && repo.color.startsWith("#") ? repo.color : "#9ca3af";
-                        return (
-                          <span key={r.repo_id}
-                            className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-600">
-                            <span className="w-1.5 h-1.5 rounded-sm" style={{ backgroundColor: hex }} />
-                            {repo.name}
-                          </span>
-                        );
-                      })}
+                      ) : (() => {
+                        const visible = memberRepos.slice(0, 3);
+                        const hidden = memberRepos.length - visible.length;
+                        return (<>
+                          {visible.map(r => {
+                            const repo = repoById.get(r.repo_id);
+                            if (!repo) return null;
+                            const hex = repo.color && repo.color.startsWith("#") ? repo.color : "#9ca3af";
+                            return (
+                              <span key={r.repo_id}
+                                className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border border-gray-200 text-gray-600 whitespace-nowrap shrink-0">
+                                <span className="w-1.5 h-1.5 rounded-sm" style={{ backgroundColor: hex }} />
+                                {repo.name}
+                              </span>
+                            );
+                          })}
+                          {hidden > 0 && (
+                            <span className="text-[10px] text-gray-400 shrink-0">+{hidden}</span>
+                          )}
+                        </>);
+                      })()}
                     </div>
                   </td>
                   <td className="px-3 py-3 align-top text-right whitespace-nowrap">
-                    {isWorking ? (
+                    {!canManage(m.id) ? (
+                      isWorking ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded bg-emerald-50 text-emerald-700">
+                          ● Working{status?.started_at ? ` since ${formatStamp(status.started_at)}` : ""}
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-gray-300 italic">—</span>
+                      )
+                    ) : isWorking ? (
                       <button onClick={() => clockOut(m.id)} disabled={busy?.startsWith("clock-out:" + m.id)}
                         title={status?.started_at ? `Clocked in at ${formatStamp(status.started_at)}` : "Clocked in"}
                         className="inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 disabled:opacity-50">
@@ -572,7 +613,7 @@ export default function TeamTable({ members, skills, repos }: {
                                 const taskBusy = busy === `check:${m.id}:${t.id}` || busy === `uncheck:${m.id}:${t.id}`;
                                 return (
                                   <li key={t.id} className="flex items-center gap-2">
-                                    <button onClick={() => isChecked ? uncheck(m.id, t.id) : check(m.id, t)}
+                                    <button onClick={() => { if (!canManage(m.id)) return; if (isChecked) uncheck(m.id, t.id); else check(m.id, t); }}
                                       disabled={taskBusy}
                                       title={isChecked ? "Stop working" : "I'm working on this"}
                                       className="text-gray-400 hover:text-emerald-600 disabled:opacity-50 shrink-0">
@@ -662,16 +703,17 @@ function CompactTaskRow({ memberId, task, checked, busy, onCheck, onUncheck, suf
   task: NotionTask;
   checked: boolean;
   busy: boolean;
-  onCheck: () => void;
-  onUncheck: () => void;
+  onCheck: (() => void) | null;
+  onUncheck: (() => void) | null;
   suffix?: React.ReactNode;
 }) {
+  const interactable = checked ? !!onUncheck : !!onCheck;
   return (
     <div className="flex items-center gap-1.5">
-      <button onClick={() => checked ? onUncheck() : onCheck()}
-        disabled={busy}
-        title={checked ? "Stop working" : "I'm working on this"}
-        className="text-gray-400 hover:text-emerald-600 disabled:opacity-50 shrink-0">
+      <button onClick={() => { if (checked) onUncheck?.(); else onCheck?.(); }}
+        disabled={busy || !interactable}
+        title={!interactable ? "Read-only — admin can change" : (checked ? "Stop working" : "I'm working on this")}
+        className="text-gray-400 hover:text-emerald-600 disabled:opacity-50 disabled:hover:text-gray-400 shrink-0">
         {busy
           ? <Loader2 size={13} className="animate-spin" />
           : checked
