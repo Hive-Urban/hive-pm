@@ -655,13 +655,15 @@ export default function GanttChart({ pillars, orphanTasks = [] }: Props) {
   // task from a real pillar contributes weight 1, but Others-pillar tasks
   // contribute weight 1/3 (they represent unplanned/auto-collected work and
   // shouldn't dominate the sprint metric just by volume).
+  // Like sprintStats, iterate over ALL pillars so the % shown in the
+  // sprint chip is correct even when that sprint isn't currently expanded.
   const OTHERS_TASK_WEIGHT = 1 / 3;
   const sprintCompletion = useMemo(() => {
     const map = new Map<number, number>();
     for (const s of allSprints) {
       let weightedSum = 0;
       let weightTotal = 0;
-      for (const p of displayPillars) {
+      for (const p of allPillars) {
         const pillarWeight = p.id === "__others__" ? OTHERS_TASK_WEIGHT : 1;
         for (const t of p.tasks ?? []) {
           if (sprintForTask(t, allSprints, now)?.index !== s.index) continue;
@@ -672,16 +674,20 @@ export default function GanttChart({ pillars, orphanTasks = [] }: Props) {
       map.set(s.index, weightTotal === 0 ? 0 : weightedSum / weightTotal);
     }
     return map;
-  }, [allSprints, displayPillars, now]);
+  }, [allSprints, allPillars, now]);
 
   // Per-sprint head-count stats — total tasks, how many are done/approved,
   // how many in progress, etc. Used by the sprint chip tooltip and the
   // SprintMetaEditor so the user sees concrete numbers, not just a %.
+  // Crucially: iterate over ALL pillars (not displayPillars), so a sprint
+  // chip that the user hasn't ticked still reports its real stats. The
+  // `visibleSprints` / `normalized` UI filters control what the table
+  // shows; they must not warp the per-sprint totals.
   const sprintStats = useMemo(() => {
     const map = new Map<number, SprintStats>();
     for (const s of allSprints) {
       const stats: SprintStats = { total: 0, done: 0, in_progress: 0, todo: 0, blocked: 0 };
-      for (const p of displayPillars) {
+      for (const p of allPillars) {
         for (const t of p.tasks ?? []) {
           if (sprintForTask(t, allSprints, now)?.index !== s.index) continue;
           stats.total += 1;
@@ -695,7 +701,7 @@ export default function GanttChart({ pillars, orphanTasks = [] }: Props) {
       map.set(s.index, stats);
     }
     return map;
-  }, [allSprints, displayPillars, now]);
+  }, [allSprints, allPillars, now]);
 
   function toggleSprint(idx: number) {
     setVisibleSprints(prev => {
