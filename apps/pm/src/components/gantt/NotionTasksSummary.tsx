@@ -415,6 +415,22 @@ function DigestPanel({ title, subtitle, icon, tasks, loading, error, pillarByPag
     try { localStorage.setItem(storageKey, String(open)); } catch { /* noop */ }
   }, [hydrated, storageKey, open]);
 
+  // Quick breakdown of the panel's tasks by Notion type. Anything that
+  // isn't recognized as bug / feature / production rolls up into "other"
+  // so the totals always add up to tasks.length and the chip line stays
+  // honest even on tasks where the Type field is empty.
+  const typeBreakdown = useMemo(() => {
+    let bugs = 0, features = 0, production = 0, other = 0;
+    for (const t of tasks) {
+      const tp = (t.type ?? "").toLowerCase();
+      if (tp === "bug") bugs++;
+      else if (tp === "feature") features++;
+      else if (tp === "production") production++;
+      else other++;
+    }
+    return { bugs, features, production, other };
+  }, [tasks]);
+
   return (
     <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
       <div className="flex items-center gap-3 px-4 py-3 hover:bg-gray-50 transition-colors">
@@ -423,10 +439,34 @@ function DigestPanel({ title, subtitle, icon, tasks, loading, error, pillarByPag
           {open ? <ChevronDown size={14} className="text-gray-400 shrink-0" /> : <ChevronRight size={14} className="text-gray-400 shrink-0" />}
           <span className="shrink-0">{icon}</span>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-sm font-semibold text-gray-900">{title}</span>
               {!loading && (
                 <span className="text-xs text-gray-400 tabular-nums">· {tasks.length}</span>
+              )}
+              {!loading && tasks.length > 0 && (
+                <span className="flex items-center gap-1">
+                  {typeBreakdown.bugs > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-50 text-red-700 border border-red-200 tabular-nums">
+                      {typeBreakdown.bugs} bug{typeBreakdown.bugs > 1 ? "s" : ""}
+                    </span>
+                  )}
+                  {typeBreakdown.features > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 tabular-nums">
+                      {typeBreakdown.features} feature{typeBreakdown.features > 1 ? "s" : ""}
+                    </span>
+                  )}
+                  {typeBreakdown.production > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 tabular-nums">
+                      {typeBreakdown.production} production
+                    </span>
+                  )}
+                  {typeBreakdown.other > 0 && (
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-gray-100 text-gray-600 border border-gray-200 tabular-nums">
+                      {typeBreakdown.other} other
+                    </span>
+                  )}
+                </span>
               )}
               {loading && <Loader2 size={12} className="animate-spin text-gray-400" />}
             </div>
