@@ -1,10 +1,15 @@
 import { supabaseAdmin } from "@/lib/supabase";
 import TeamTable from "@/components/TeamTable";
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 export default async function TeamPage() {
   const db = supabaseAdmin();
+  const session = await getServerSession(authOptions);
+  const viewerEmail = session?.user?.email?.toLowerCase() ?? null;
+
   const [{ data: members }, { data: skills }, { data: repos }] = await Promise.all([
     db.from("rnd_members").select(`
       *,
@@ -14,6 +19,18 @@ export default async function TeamPage() {
     db.from("rnd_skills").select("id, name, category_id"),
     db.from("rnd_repos").select("id, name, slug, color"),
   ]);
+
+  // Resolve the viewer's member identity + admin flag so the table can
+  // gate expansion and clock-in/out actions.
+  let viewerId: string | null = null;
+  let viewerIsAdmin = false;
+  if (viewerEmail) {
+    const me = (members ?? []).find(m => (m.email ?? "").toLowerCase() === viewerEmail);
+    if (me) {
+      viewerId = me.id as string;
+      viewerIsAdmin = !!me.is_admin;
+    }
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-8">
@@ -31,6 +48,8 @@ export default async function TeamPage() {
         members={members ?? []}
         skills={skills ?? []}
         repos={repos ?? []}
+        viewerId={viewerId}
+        viewerIsAdmin={viewerIsAdmin}
       />
     </div>
   );

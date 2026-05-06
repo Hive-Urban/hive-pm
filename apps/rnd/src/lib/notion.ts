@@ -49,19 +49,34 @@ export async function fetchNotionTasks(filter?: {
     filters.push({ property: "Sprint", select: { equals: filter.sprint } });
   }
 
-  // Paginate through the entire Notion DB (cap at ~2000 to stay safe)
+  // Paginate through the entire Notion DB (cap at ~2000 to stay safe).
+  // Sort by the "ID" property when available; fall back to no sort if the
+  // property is renamed/missing in this DB — Notion 400s otherwise and the
+  // whole "Working on" column lights up red.
   const MAX_PAGES = 20;
   const PAGE_SIZE = 100;
   const results: any[] = [];
   let cursor: string | undefined;
+  let useIdSort = true;
   for (let i = 0; i < MAX_PAGES; i++) {
-    const response = await notion.databases.query({
-      database_id: DATABASE_ID,
-      filter: filters.length > 0 ? { and: filters } : undefined,
-      page_size: PAGE_SIZE,
-      start_cursor: cursor,
-      sorts: [{ property: "ID", direction: "descending" }],
-    });
+    let response;
+    try {
+      response = await notion.databases.query({
+        database_id: DATABASE_ID,
+        filter: filters.length > 0 ? { and: filters } : undefined,
+        page_size: PAGE_SIZE,
+        start_cursor: cursor,
+        sorts: useIdSort ? [{ property: "ID", direction: "descending" }] : undefined,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (useIdSort && /sort property|sort_property|"ID"/i.test(msg)) {
+        useIdSort = false;
+        i--; // retry this page without the offending sort
+        continue;
+      }
+      throw err;
+    }
     results.push(...response.results);
     if (!response.has_more || !response.next_cursor) break;
     cursor = response.next_cursor;

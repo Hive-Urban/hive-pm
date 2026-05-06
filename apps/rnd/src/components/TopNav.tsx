@@ -2,13 +2,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import clsx from "clsx";
-import { Users, Grid3x3, FolderKanban, Settings } from "lucide-react";
+import { Users, User, Grid3x3, FolderKanban, Settings } from "lucide-react";
 
 const TABS = [
-  { href: "/team",   label: "Team",   icon: Users },
-  { href: "/matrix", label: "Matrix", icon: Grid3x3 },
-  { href: "/repos",  label: "Repos",  icon: FolderKanban },
-  { href: "/admin",  label: "Admin",  icon: Settings },
+  { href: "/team",   label: "Team",     icon: Users },
+  { href: "/me",     label: "Personal", icon: User },
+  { href: "/matrix", label: "Matrix",   icon: Grid3x3 },
+  { href: "/repos",  label: "Repos",    icon: FolderKanban },
+  { href: "/admin",  label: "Admin",    icon: Settings },
 ] as const;
 
 export default function TopNav() {
