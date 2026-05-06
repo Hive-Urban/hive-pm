@@ -303,18 +303,17 @@ export default function NotionTasksSummary({ pillars }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    // Don't refetch on every page mount; reuse the cached payload from
-    // the previous visit so navigating between pages stays free of
-    // Notion API calls. Refresh Data clears this and triggers a fresh
-    // fetch on the next remount.
+    // Stale-while-revalidate: paint immediately from cache (so the panel
+    // never blocks on a multi-second Notion fetch), then ALWAYS refresh
+    // in the background so a status change in Notion (e.g. a task that
+    // flipped to Done) propagates without forcing the user to click
+    // Refresh Data. Previously the cache short-circuited the fetch and
+    // bugs that flipped to Done lingered in Hot tasks indefinitely.
     try {
       const cached = localStorage.getItem("notion:tasks-cache");
       if (cached) {
         const parsed = JSON.parse(cached);
-        if (parsed?.tasks) {
-          setTasks(parsed.tasks);
-          return () => { cancelled = true; };
-        }
+        if (parsed?.tasks) setTasks(parsed.tasks);
       }
     } catch { /* noop */ }
 
