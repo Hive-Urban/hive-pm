@@ -49,19 +49,34 @@ export async function fetchNotionTasks(filter?: {
     filters.push({ property: "Sprint", select: { equals: filter.sprint } });
   }
 
-  // Paginate through the entire Notion DB (cap at ~2000 to stay safe)
+  // Paginate through the entire Notion DB (cap at ~2000 to stay safe).
+  // Sort by the "ID" property when available; fall back to no sort if the
+  // property is renamed/missing in this DB — Notion returns 400 otherwise
+  // and the entire task picker / Working-on column lights up empty.
   const MAX_PAGES = 20;
   const PAGE_SIZE = 100;
   const results: any[] = [];
   let cursor: string | undefined;
+  let useIdSort = true;
   for (let i = 0; i < MAX_PAGES; i++) {
-    const response = await notion.databases.query({
-      database_id: DATABASE_ID,
-      filter: filters.length > 0 ? { and: filters } : undefined,
-      page_size: PAGE_SIZE,
-      start_cursor: cursor,
-      sorts: [{ property: "ID", direction: "descending" }],
-    });
+    let response;
+    try {
+      response = await notion.databases.query({
+        database_id: DATABASE_ID,
+        filter: filters.length > 0 ? { and: filters } : undefined,
+        page_size: PAGE_SIZE,
+        start_cursor: cursor,
+        sorts: useIdSort ? [{ property: "ID", direction: "descending" }] : undefined,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (useIdSort && /sort property|sort_property|"ID"/i.test(msg)) {
+        useIdSort = false;
+        i--; // retry this page without the offending sort
+        continue;
+      }
+      throw err;
+    }
     results.push(...response.results);
     if (!response.has_more || !response.next_cursor) break;
     cursor = response.next_cursor;
@@ -102,12 +117,24 @@ export async function fetchNotionTaskByPageId(pageId: string): Promise<NotionTas
 }
 
 export async function fetchCurrentSprint(): Promise<string | null> {
-  // Query to find the most recent sprint name from tasks
-  const response = await notion.databases.query({
+  // Query to find the most recent sprint name from tasks. Falls back to
+  // an unsorted query if the "ID" property isn't sortable in this DB.
+  const opts: Parameters<typeof notion.databases.query>[0] = {
     database_id: DATABASE_ID,
     page_size: 1,
     sorts: [{ property: "ID", direction: "descending" }],
-  });
+  };
+  let response;
+  try {
+    response = await notion.databases.query(opts);
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (/sort property|sort_property|"ID"/i.test(msg)) {
+      response = await notion.databases.query({ ...opts, sorts: undefined });
+    } else {
+      throw err;
+    }
+  }
   const first = response.results[0] as any;
   if (!first) return null;
   return extractSelect(first.properties["Sprint"]);
