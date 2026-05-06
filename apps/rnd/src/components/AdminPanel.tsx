@@ -163,17 +163,32 @@ function MemberRowEditable({ member, busy, onRemove }: {
   const router = useRouter();
   const [fullName, setFullName] = useState(member.full_name);
   const [notionName, setNotionName] = useState(member.notion_assignee_name ?? "");
-  const [saving, setSaving] = useState<"full_name" | "notion_assignee_name" | null>(null);
+  const [email, setEmail] = useState(member.email);
+  const [saving, setSaving] = useState<"full_name" | "notion_assignee_name" | "email" | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  async function patch(field: "full_name" | "notion_assignee_name", value: string) {
+  async function patch(field: "full_name" | "notion_assignee_name" | "email", value: string) {
     setSaving(field);
+    setError(null);
     try {
-      await fetch(`/api/members/${member.id}`, {
+      const payload: Record<string, string | null> =
+        field === "notion_assignee_name" ? { [field]: value || null } : { [field]: value };
+      const res = await fetch(`/api/members/${member.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ [field]: field === "notion_assignee_name" ? (value || null) : value }),
+        body: JSON.stringify(payload),
       });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e?.error ?? `HTTP ${res.status}`);
+      }
       router.refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "unknown");
+      // Reset stale field value on error so the user sees the rollback.
+      if (field === "email") setEmail(member.email);
+      if (field === "full_name") setFullName(member.full_name);
+      if (field === "notion_assignee_name") setNotionName(member.notion_assignee_name ?? "");
     } finally { setSaving(null); }
   }
 
@@ -199,7 +214,17 @@ function MemberRowEditable({ member, busy, onRemove }: {
         />
         {saving === "notion_assignee_name" && <Loader2 size={10} className="inline animate-spin text-gray-400" />}
       </td>
-      <td className="px-4 py-2 text-gray-500 text-xs">{member.email}</td>
+      <td className="px-4 py-2 text-gray-500 text-xs">
+        <input
+          type="email"
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+          onBlur={() => email !== member.email && patch("email", email)}
+          className="w-full bg-transparent border border-transparent hover:border-gray-200 focus:border-indigo-400 focus:bg-white rounded px-1 py-0.5 text-xs focus:outline-none"
+        />
+        {saving === "email" && <Loader2 size={10} className="inline animate-spin text-gray-400" />}
+        {error && <p className="text-[10px] text-red-600 mt-0.5" title={error}>{error}</p>}
+      </td>
       <td className="px-4 py-2 text-gray-700">{member.role}</td>
       <td className="px-4 py-2 text-gray-500 text-xs font-mono">{member.slack_user_id ?? "—"}</td>
       <td className="px-4 py-2 text-right">
