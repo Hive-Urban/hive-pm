@@ -63,6 +63,13 @@ function extractPeople(prop: any): string | null {
   return people.length > 0 ? people[0].name : null;
 }
 
+function extractAllPeople(prop: any): string[] {
+  const people = prop?.people ?? [];
+  return people
+    .map((p: any) => (typeof p?.name === "string" ? p.name.trim() : ""))
+    .filter(Boolean);
+}
+
 export async function fetchNotionTasks(filter?: {
   product?: string;
   sprint?: string;
@@ -117,6 +124,12 @@ export async function fetchNotionTasks(filter?: {
 
 export function mapPageToTask(page: any): NotionTask {
   const props = page.properties;
+  const allAssignees = Array.from(
+    new Set([
+      ...extractAllPeople(props["Assigned to"]),
+      ...extractAllPeople(props["Assignee"]),
+    ])
+  );
   return {
     id: page.id,
     page_url: page.url,
@@ -127,7 +140,8 @@ export function mapPageToTask(page: any): NotionTask {
     product: extractMultiSelect(props["product"])?.[0] ?? extractSelect(props["product"]) ?? null,
     area: extractSelect(props["Area"]),
     sprint: extractNumber(props["Sprint"]) ? `Sprint ${extractNumber(props["Sprint"])}` : null,
-    assignee: extractPeople(props["Assigned to"]) ?? extractPeople(props["Assignee"]),
+    assignee: allAssignees[0] ?? null,
+    assignees: allAssignees,
     due_date: extractDate(props["Due date"]) ?? extractDate(props["Due Date"]) ?? extractDate(props["Due"]),
     type: extractSelect(props["Bug/Feature"])?.toLowerCase() as NotionTask["type"] ?? extractSelect(props["Type"])?.toLowerCase() as NotionTask["type"] ?? null,
     tags: extractMultiSelect(props["Tags"]),

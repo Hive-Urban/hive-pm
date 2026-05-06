@@ -10,13 +10,24 @@ export async function GET() {
     const tasks = await fetchNotionTasks();
     const byAssignee: Record<string, { active: typeof tasks; done: typeof tasks }> = {};
     for (const t of tasks) {
-      const assignee = t.assignee?.trim();
-      if (!assignee) continue;
-      if (!byAssignee[assignee]) byAssignee[assignee] = { active: [], done: [] };
+      // A task can have multiple assignees in Notion; bucket it under each
+      // person so anyone listed sees it on their row.
+      const names = (t.assignees && t.assignees.length > 0
+        ? t.assignees
+        : t.assignee
+          ? [t.assignee]
+          : []
+      )
+        .map((n) => n?.trim())
+        .filter((n): n is string => Boolean(n));
+      if (names.length === 0) continue;
       const s = (t.status ?? "").toLowerCase();
       const isDone = s === "done" || s === "complete" || s.includes("approved");
-      if (isDone) byAssignee[assignee].done.push(t);
-      else byAssignee[assignee].active.push(t);
+      for (const name of names) {
+        if (!byAssignee[name]) byAssignee[name] = { active: [], done: [] };
+        if (isDone) byAssignee[name].done.push(t);
+        else byAssignee[name].active.push(t);
+      }
     }
     return NextResponse.json({ byAssignee });
   } catch (err: unknown) {

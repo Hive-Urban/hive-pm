@@ -79,6 +79,8 @@ export default function MemberDetail({ member, skills, categories, repos, canEdi
   // Live Notion task lookup keyed off full_name (matches Notion `Assigned to`).
   const [tasks, setTasks] = useState<{ active: NotionTask[]; done: NotionTask[] } | null>(null);
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  // Acute flags from the PM app — read-only here, used for red row styling.
+  const [acuteIds, setAcuteIds] = useState<Set<string>>(new Set());
   const [workActive, setWorkActive] = useState<boolean>(false);
   const [workStartedAt, setWorkStartedAt] = useState<string | null>(null);
   const [autoEndHour, setAutoEndHour] = useState(20);
@@ -121,7 +123,14 @@ export default function MemberDetail({ member, skills, categories, repos, canEdi
       .then(r => r.json())
       .then(data => setEvents(data.items ?? []))
       .catch(() => setEvents([]));
-  }, [member.full_name, member.id]);
+    fetch("/api/acute-flags")
+      .then(r => r.json())
+      .then(data => {
+        const ids: string[] = Array.isArray(data?.ids) ? data.ids : [];
+        setAcuteIds(new Set(ids));
+      })
+      .catch(() => setAcuteIds(new Set()));
+  }, [member.full_name, member.id, member.notion_assignee_name]);
 
   useEffect(() => { loadStatus(); }, [loadStatus]);
 
@@ -329,9 +338,14 @@ export default function MemberDetail({ member, skills, categories, repos, canEdi
                   <ul className="space-y-1">
                     {tasks.active.map(t => {
                       const isChecked = checkedIds.has(t.id);
+                      const isAcute = acuteIds.has(t.id);
                       const itemBusy = taskBusyId === t.id;
                       return (
-                        <li key={t.id} className="flex items-center gap-2">
+                        <li key={t.id}
+                          className={clsx(
+                            "flex items-center gap-2 -mx-2 px-2 py-0.5 rounded",
+                            isAcute && "bg-red-50/60"
+                          )}>
                           <button onClick={() => canEdit && toggleCheck(t)}
                             disabled={itemBusy || !canEdit}
                             title={isChecked ? "Stop working" : "I'm working on this"}
@@ -345,12 +359,17 @@ export default function MemberDetail({ member, skills, categories, repos, canEdi
                           <a href={t.page_url} target="_blank" rel="noopener noreferrer"
                             className={clsx(
                               "flex items-center gap-1.5 text-[13px] hover:text-indigo-700 flex-1 min-w-0",
-                              isChecked ? "text-emerald-700 font-medium" : "text-gray-700"
-                            )}>
+                              isAcute ? "text-red-700 font-medium"
+                                : isChecked ? "text-emerald-700 font-medium"
+                                : "text-gray-700"
+                            )}
+                            title={isAcute ? "Marked acute in PM" : undefined}>
                             {t.notion_id != null && (
                               <span className={clsx(
                                 "text-[10px] font-mono tabular-nums shrink-0",
-                                isChecked ? "text-emerald-500" : "text-gray-400"
+                                isAcute ? "text-red-500"
+                                  : isChecked ? "text-emerald-500"
+                                  : "text-gray-400"
                               )}>#{t.notion_id}</span>
                             )}
                             <span className="flex-1 truncate">{t.name}</span>

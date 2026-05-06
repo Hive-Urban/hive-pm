@@ -10,6 +10,7 @@ import { ChevronDown, ChevronRight, ExternalLink, Loader2, CheckCircle2, Circle,
 const CACHE_TASKS_KEY = "rnd:cache:tasks-by-member";
 const CACHE_CHECKS_KEY = "rnd:cache:task-checks";
 const CACHE_WORK_KEY = "rnd:cache:work-status";
+const CACHE_ACUTE_KEY = "rnd:cache:acute-ids";
 
 function loadCache<T>(key: string): { ts: number; data: T } | null {
   if (typeof window === "undefined") return null;
@@ -94,6 +95,9 @@ export default function TeamTable({ members, skills, repos, viewerId = null, vie
   const [checks, setChecks] = useState<TaskCheck[]>([]);
   const [workStatus, setWorkStatus] = useState<Record<string, WorkStatus>>({});
   const [autoEndHour, setAutoEndHour] = useState(19);
+  // Acute task ids — owned by the PM app's pm_acute_flags table. We only
+  // read it here so PM-flagged "right now" tasks render red in R&D too.
+  const [acuteIds, setAcuteIds] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -106,12 +110,14 @@ export default function TeamTable({ members, skills, repos, viewerId = null, vie
     const t = loadCache<ByAssignee>(CACHE_TASKS_KEY);
     const c = loadCache<TaskCheck[]>(CACHE_CHECKS_KEY);
     const w = loadCache<{ byMember: Record<string, WorkStatus>; autoEndHour: number }>(CACHE_WORK_KEY);
+    const a = loadCache<string[]>(CACHE_ACUTE_KEY);
     if (t) { setTasks(t.data); setCacheTs(t.ts); }
     if (c) setChecks(c.data);
     if (w) {
       setWorkStatus(w.data.byMember ?? {});
       if (w.data.autoEndHour) setAutoEndHour(w.data.autoEndHour);
     }
+    if (a) setAcuteIds(new Set(a.data));
     void refresh(false);
   }, []);
 
@@ -121,23 +127,27 @@ export default function TeamTable({ members, skills, repos, viewerId = null, vie
   const refresh = useCallback(async (showSpinner: boolean) => {
     if (showSpinner) setRefreshing(true);
     try {
-      const [tRes, cRes, wRes] = await Promise.all([
+      const [tRes, cRes, wRes, aRes] = await Promise.all([
         fetch("/api/notion-tasks-by-member").then(r => r.json()).catch(err => ({ error: String(err?.message ?? err) })),
         fetch("/api/task-checks").then(r => r.json()).catch(() => ({ items: [] })),
         fetch("/api/work-sessions").then(r => r.json()).catch(() => ({ byMember: {} })),
+        fetch("/api/acute-flags").then(r => r.json()).catch(() => ({ ids: [] })),
       ]);
       if (tRes?.error) setTaskError(String(tRes.error));
       else setTaskError(null);
       const tasksData = tRes?.byAssignee ?? {};
       const checksData = cRes?.items ?? [];
       const workData = { byMember: wRes?.byMember ?? {}, autoEndHour: wRes?.autoEndHour ?? 19 };
+      const acuteList: string[] = Array.isArray(aRes?.ids) ? aRes.ids : [];
       setTasks(tasksData);
       setChecks(checksData);
       setWorkStatus(workData.byMember);
       if (workData.autoEndHour) setAutoEndHour(workData.autoEndHour);
+      setAcuteIds(new Set(acuteList));
       saveCache(CACHE_TASKS_KEY, tasksData);
       saveCache(CACHE_CHECKS_KEY, checksData);
       saveCache(CACHE_WORK_KEY, workData);
+      saveCache(CACHE_ACUTE_KEY, acuteList);
       setCacheTs(Date.now());
     } finally {
       if (showSpinner) setRefreshing(false);
@@ -483,6 +493,7 @@ export default function TeamTable({ members, skills, repos, viewerId = null, vie
                         memberId={m.id}
                         task={primary}
                         checked={memberChecks.has(primary.id)}
+                        acute={acuteIds.has(primary.id)}
                         busy={busy === `check:${m.id}:${primary.id}` || busy === `uncheck:${m.id}:${primary.id}`}
                         onCheck={canManage(m.id) ? () => check(m.id, primary) : null}
                         onUncheck={canManage(m.id) ? () => uncheck(m.id, primary.id) : null}
@@ -610,9 +621,14 @@ export default function TeamTable({ members, skills, repos, viewerId = null, vie
                             <ul className="space-y-1">
                               {active.map(t => {
                                 const isChecked = memberChecks.has(t.id);
+                                const isAcute = acuteIds.has(t.id);
                                 const taskBusy = busy === `check:${m.id}:${t.id}` || busy === `uncheck:${m.id}:${t.id}`;
                                 return (
-                                  <li key={t.id} className="flex items-center gap-2">
+                                  <li key={t.id}
+                                    className={clsx(
+                                      "flex items-center gap-2 -mx-2 px-2 py-0.5 rounded",
+                                      isAcute && "bg-red-50/60"
+                                    )}>
                                     <button onClick={() => { if (!canManage(m.id)) return; if (isChecked) uncheck(m.id, t.id); else check(m.id, t); }}
                                       disabled={taskBusy}
                                       title={isChecked ? "Stop working" : "I'm working on this"}
@@ -624,9 +640,16 @@ export default function TeamTable({ members, skills, repos, viewerId = null, vie
                                           : <Circle size={14} />}
                                     </button>
                                     <a href={t.page_url} target="_blank" rel="noopener noreferrer"
-                                      className="flex items-center gap-1.5 text-[12px] text-gray-700 hover:text-indigo-700 flex-1 min-w-0">
+                                      className={clsx(
+                                        "flex items-center gap-1.5 text-[12px] hover:text-indigo-700 flex-1 min-w-0",
+                                        isAcute ? "text-red-700 font-medium" : "text-gray-700"
+                                      )}
+                                      title={isAcute ? "Marked acute in PM" : undefined}>
                                       {t.notion_id != null && (
-                                        <span className="text-[10px] font-mono text-gray-400 tabular-nums shrink-0">
+                                        <span className={clsx(
+                                          "text-[10px] font-mono tabular-nums shrink-0",
+                                          isAcute ? "text-red-500" : "text-gray-400"
+                                        )}>
                                           #{t.notion_id}
                                         </span>
                                       )}
@@ -698,18 +721,25 @@ function Row({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-function CompactTaskRow({ memberId, task, checked, busy, onCheck, onUncheck, suffix }: {
+function CompactTaskRow({ memberId, task, checked, acute = false, busy, onCheck, onUncheck, suffix }: {
   memberId: string;
   task: NotionTask;
   checked: boolean;
+  acute?: boolean;
   busy: boolean;
   onCheck: (() => void) | null;
   onUncheck: (() => void) | null;
   suffix?: React.ReactNode;
 }) {
   const interactable = checked ? !!onUncheck : !!onCheck;
+  // Acute beats checked/default for the text + #id color, since the PM
+  // has explicitly flagged this as a "right now" task and that signal
+  // should dominate the row.
   return (
-    <div className="flex items-center gap-1.5">
+    <div className={clsx(
+      "flex items-center gap-1.5 -mx-1 px-1 rounded",
+      acute && "bg-red-50/60"
+    )}>
       <button onClick={() => { if (checked) onUncheck?.(); else onCheck?.(); }}
         disabled={busy || !interactable}
         title={!interactable ? "Read-only — admin can change" : (checked ? "Stop working" : "I'm working on this")}
@@ -723,12 +753,17 @@ function CompactTaskRow({ memberId, task, checked, busy, onCheck, onUncheck, suf
       <a href={task.page_url} target="_blank" rel="noopener noreferrer"
         className={clsx(
           "flex items-center gap-1.5 text-[12px] hover:text-indigo-700 min-w-0",
-          checked ? "text-emerald-700 font-medium" : "text-gray-700"
-        )}>
+          acute ? "text-red-700 font-medium"
+            : checked ? "text-emerald-700 font-medium"
+            : "text-gray-700"
+        )}
+        title={acute ? "Marked acute in PM" : undefined}>
         {task.notion_id != null && (
           <span className={clsx(
             "text-[10px] font-mono tabular-nums shrink-0",
-            checked ? "text-emerald-500" : "text-gray-400"
+            acute ? "text-red-500"
+              : checked ? "text-emerald-500"
+              : "text-gray-400"
           )}>
             #{task.notion_id}
           </span>

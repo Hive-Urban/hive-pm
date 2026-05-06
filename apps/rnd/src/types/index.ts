@@ -58,6 +58,7 @@ export type NotionTask = {
   area: string | null;
   sprint: string | null;
   assignee: string | null;
+  assignees: string[];
   due_date: string | null;
   type: "feature" | "bug" | "task" | null;
   tags: string[];
