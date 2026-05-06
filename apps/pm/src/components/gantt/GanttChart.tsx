@@ -412,14 +412,20 @@ export default function GanttChart({ pillars, orphanTasks = [] }: Props) {
         try {
           const arr = JSON.parse(vsRaw);
           if (Array.isArray(arr)) {
+            // Even if a previous version saved multiple, collapse to one
+            // (the lowest valid index) — radio mode allows only one.
             const cleaned = arr
               .map(x => Number(x))
-              .filter(x => Number.isFinite(x) && x >= 1 && x <= n);
-            if (cleaned.length > 0) visible = new Set(cleaned);
+              .filter(x => Number.isFinite(x) && x >= 1 && x <= n)
+              .sort((a, b) => a - b);
+            if (cleaned.length > 0) visible = new Set([cleaned[0]]);
           }
         } catch { /* fall through */ }
       }
-      setVisibleSprints(visible ?? new Set(Array.from({ length: n }, (_, i) => i + 1)));
+      // Default to the current-by-date sprint when nothing was saved, so
+      // the first paint shows the sprint the user is actually living in.
+      const defaultIdx = Math.min(n, Math.max(1, currentSprintIndex(n, now)));
+      setVisibleSprints(visible ?? new Set([defaultIdx]));
       const wRaw = localStorage.getItem(LABEL_WIDTH_KEY);
       if (wRaw) {
         const w = parseInt(wRaw, 10);
@@ -703,18 +709,22 @@ export default function GanttChart({ pillars, orphanTasks = [] }: Props) {
     return map;
   }, [allSprints, allPillars, now]);
 
+  // Sprint chips behave like radio buttons — selecting one deselects the
+  // rest, and clicking the already-active chip is a no-op (we never want
+  // 0 sprints visible, since that would empty the entire table).
   function toggleSprint(idx: number) {
     setVisibleSprints(prev => {
-      const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx); else next.add(idx);
-      return next;
+      if (prev.size === 1 && prev.has(idx)) return prev;
+      return new Set([idx]);
     });
   }
 
   function addSprint() {
     setSprintCount(c => {
       const next = c + 1;
-      setVisibleSprints(prev => new Set(prev).add(next));
+      // Radio mode: the newly created sprint becomes the *only* visible one
+      // so the user immediately sees the empty sprint they just made.
+      setVisibleSprints(new Set([next]));
       return next;
     });
   }
@@ -724,9 +734,13 @@ export default function GanttChart({ pillars, orphanTasks = [] }: Props) {
       if (c <= 1) return c;
       const next = c - 1;
       setVisibleSprints(prev => {
-        const v = new Set(prev);
-        v.delete(c);
-        return v;
+        // If the removed sprint was the active one, fall back to the
+        // current-by-date sprint (clamped to the new count).
+        if (prev.has(c)) {
+          const fallback = Math.min(next, Math.max(1, currentSprintIndex(next, now)));
+          return new Set([fallback]);
+        }
+        return prev;
       });
       return next;
     });
