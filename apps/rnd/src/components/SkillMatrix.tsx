@@ -125,7 +125,12 @@ export default function SkillMatrix({ members, skills, categories }: {
                 );
               })}
             </tr>
-            {/* Skill names row */}
+            {/* Skill names row — column headers rotated -90deg so each
+                skill's text reads bottom-to-top with normal LTR character
+                order. Fixed-height th + absolutely positioned span keeps
+                the row crisp regardless of how long the longest name is.
+                Avoids writing-mode (which interacts oddly with the page's
+                RTL direction and produced reversed-looking labels). */}
             <tr>
               <th className="bg-gray-50 sticky left-0 z-10 px-4 py-2 border-t border-gray-200" />
               {categories.flatMap(cat => {
@@ -133,11 +138,15 @@ export default function SkillMatrix({ members, skills, categories }: {
                 return inCat.map((s, i) => (
                   <th key={s.id}
                     className={clsx(
-                      "bg-gray-50 px-1 py-2 border-t border-gray-200 text-[10px] font-medium text-gray-600 align-bottom",
+                      "bg-gray-50 border-t border-gray-200 align-bottom relative",
                       i === 0 && "border-l border-gray-200"
                     )}
-                    style={{ writingMode: "vertical-rl", minHeight: "120px" }}>
-                    <div className="rotate-180 whitespace-nowrap">{s.name}</div>
+                    style={{ height: 130, width: 28, minWidth: 28 }}>
+                    <div
+                      className="absolute left-1/2 bottom-2 origin-bottom-left whitespace-nowrap text-[10px] font-medium text-gray-600"
+                      style={{ transform: "rotate(-90deg) translateX(8px)", direction: "ltr" }}>
+                      {s.name}
+                    </div>
                   </th>
                 ));
               })}
