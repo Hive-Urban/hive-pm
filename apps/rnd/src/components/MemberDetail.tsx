@@ -116,6 +116,11 @@ export default function MemberDetail({ member, skills, categories, repos, canEdi
             seen.add(t.id); done.push(t);
           }
         }
+        // Highest Notion auto-id first; missing ids sink to the bottom.
+        const byIdDesc = (a: NotionTask, b: NotionTask) =>
+          (b.notion_id ?? -Infinity) - (a.notion_id ?? -Infinity);
+        active.sort(byIdDesc);
+        done.sort(byIdDesc);
         setTasks({ active, done });
       })
       .catch(() => setTasks({ active: [], done: [] }));

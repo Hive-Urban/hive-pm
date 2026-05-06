@@ -41,6 +41,14 @@ function normalizeName(s: string | null | undefined): string {
   return (s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 }
 
+// Sort comparator: highest Notion auto-id first; tasks missing notion_id
+// (manual entries, sync gaps) drop to the bottom.
+function byNotionIdDesc(a: { notion_id: number | null }, b: { notion_id: number | null }): number {
+  const av = a.notion_id ?? -Infinity;
+  const bv = b.notion_id ?? -Infinity;
+  return bv - av;
+}
+
 type MemberSkill = { skill_id: string; level: number };
 type MemberRepo = { repo_id: string; role: string | null };
 type Member = {
@@ -456,8 +464,11 @@ export default function TeamTable({ members, skills, repos, viewerId = null, vie
         <tbody>
           {members.map(m => {
             const memberTasks = bucketFor(m);
-            const active = memberTasks?.active ?? [];
-            const done = memberTasks?.done ?? [];
+            // Sort by Notion auto-id, newest (highest) first — tasks
+            // without a notion_id push to the bottom so the visible
+            // numbers read as a clean descending sequence.
+            const active = (memberTasks?.active ?? []).slice().sort(byNotionIdDesc);
+            const done = (memberTasks?.done ?? []).slice().sort(byNotionIdDesc);
             const memberChecks = checksByMember.get(m.id) ?? new Set<string>();
             const checkedActive = active.filter(t => memberChecks.has(t.id));
             // Compact view shows only the checked-on task (the one the
