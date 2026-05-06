@@ -92,17 +92,31 @@ export default function MemberDetail({ member, skills, categories, repos, canEdi
     fetch("/api/notion-tasks-by-member")
       .then(r => r.json())
       .then(data => {
-        // Tolerate case/whitespace differences. Prefer the explicit
-        // notion_assignee_name override (used when Notion shows e.g. "Max"
-        // or an email instead of the human-readable full name).
-        const wantedRaw = member.notion_assignee_name || member.full_name;
-        const wantedNorm = (wantedRaw ?? "").trim().toLowerCase().replace(/\s+/g, " ");
-        let bucket: { active: NotionTask[]; done: NotionTask[] } | undefined;
-        for (const [name, b] of Object.entries(data.byAssignee ?? {})) {
-          const norm = name.trim().toLowerCase().replace(/\s+/g, " ");
-          if (norm === wantedNorm) { bucket = b as typeof bucket; break; }
+        // Match against BOTH the override and the full_name — earlier the
+        // override hid tasks when Notion actually used a different alias.
+        const norm = (s: string | null | undefined) =>
+          (s ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+        const wanted = new Set<string>();
+        const a = norm(member.notion_assignee_name);
+        const b = norm(member.full_name);
+        if (a) wanted.add(a);
+        if (b) wanted.add(b);
+        const seen = new Set<string>();
+        const active: NotionTask[] = [];
+        const done: NotionTask[] = [];
+        for (const [name, bucket] of Object.entries(data.byAssignee ?? {})) {
+          if (!wanted.has(norm(name))) continue;
+          const buck = bucket as { active: NotionTask[]; done: NotionTask[] };
+          for (const t of buck.active) {
+            if (seen.has(t.id)) continue;
+            seen.add(t.id); active.push(t);
+          }
+          for (const t of buck.done) {
+            if (seen.has(t.id)) continue;
+            seen.add(t.id); done.push(t);
+          }
         }
-        setTasks(bucket ?? { active: [], done: [] });
+        setTasks({ active, done });
       })
       .catch(() => setTasks({ active: [], done: [] }));
     fetch(`/api/task-checks?member_id=${member.id}`)

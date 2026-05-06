@@ -196,16 +196,24 @@ export default function TeamTable({ members, skills, repos, viewerId = null, vie
     return m;
   }, [tasks]);
 
-  // Resolve the name to use against Notion's `Assigned to` for each
-  // member: prefer the explicit notion_assignee_name override, fall back
-  // to full_name if not set.
-  const matchNameOf = (m: Member) => normalizeName(m.notion_assignee_name || m.full_name);
+  // A member can be addressed in Notion by either their full_name or by an
+  // explicit `notion_assignee_name` override. We try both — earlier the
+  // override *replaced* full_name, so e.g. an override of "Michael" hid
+  // tasks where Notion actually wrote "Michael Marcus".
+  const matchNamesOf = (m: Member): string[] => {
+    const out = new Set<string>();
+    const a = normalizeName(m.notion_assignee_name);
+    const b = normalizeName(m.full_name);
+    if (a) out.add(a);
+    if (b) out.add(b);
+    return [...out];
+  };
 
   // Notion assignees that don't match any active member — diagnostic for
   // when "task #X assigned to me doesn't show up in my row" turns out to
   // be a name mismatch between Notion and the member roster.
   const memberNormNames = useMemo(
-    () => new Set(members.map(matchNameOf)),
+    () => new Set(members.flatMap(matchNamesOf)),
     [members]
   );
   const unknownAssignees = useMemo(() => {
@@ -214,6 +222,30 @@ export default function TeamTable({ members, skills, repos, viewerId = null, vie
       .filter(name => !memberNormNames.has(normalizeName(name)))
       .sort();
   }, [tasks, memberNormNames]);
+
+  // Merge buckets across all of a member's match names so a member listed
+  // in Notion under either alias collects all their tasks in one place.
+  function bucketFor(m: Member): { active: NotionTask[]; done: NotionTask[] } | undefined {
+    if (!tasksByNorm) return undefined;
+    const seen = new Set<string>();
+    const active: NotionTask[] = [];
+    const done: NotionTask[] = [];
+    let hit = false;
+    for (const n of matchNamesOf(m)) {
+      const b = tasksByNorm.get(n);
+      if (!b) continue;
+      hit = true;
+      for (const t of b.active) {
+        if (seen.has(t.id)) continue;
+        seen.add(t.id); active.push(t);
+      }
+      for (const t of b.done) {
+        if (seen.has(t.id)) continue;
+        seen.add(t.id); done.push(t);
+      }
+    }
+    return hit ? { active, done } : undefined;
+  }
 
   function canManage(memberId: string): boolean {
     return viewerIsAdmin || viewerId === memberId;
@@ -423,7 +455,7 @@ export default function TeamTable({ members, skills, repos, viewerId = null, vie
         </thead>
         <tbody>
           {members.map(m => {
-            const memberTasks = tasksByNorm?.get(matchNameOf(m));
+            const memberTasks = bucketFor(m);
             const active = memberTasks?.active ?? [];
             const done = memberTasks?.done ?? [];
             const memberChecks = checksByMember.get(m.id) ?? new Set<string>();
