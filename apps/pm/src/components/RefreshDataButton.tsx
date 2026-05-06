@@ -10,14 +10,21 @@ export default function RefreshDataButton() {
   const router = useRouter();
   const [state, setState] = useState<State>("idle");
   const [updated, setUpdated] = useState<number | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   async function refresh() {
     if (state === "syncing") return;
     setState("syncing");
     setUpdated(null);
+    setErrorMsg(null);
     try {
       const res = await fetch("/api/sync-from-notion", { method: "POST" });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        // Try to read the structured error first, fall back to raw text.
+        const body = await res.json().catch(() => null);
+        const text = body?.error ?? (await res.text().catch(() => `HTTP ${res.status}`));
+        throw new Error(text);
+      }
       const data = await res.json();
       setUpdated(typeof data?.updated === "number" ? data.updated : null);
       // Bust client-side Notion caches so subsequent renders refetch
@@ -33,9 +40,11 @@ export default function RefreshDataButton() {
       setState("ok");
       router.refresh();
       setTimeout(() => setState("idle"), 2200);
-    } catch {
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "unknown");
       setState("error");
-      setTimeout(() => setState("idle"), 2500);
+      // Keep the error visible for longer so the user can read it.
+      setTimeout(() => { setState("idle"); setErrorMsg(null); }, 8000);
     }
   }
 
@@ -51,16 +60,23 @@ export default function RefreshDataButton() {
     : RefreshCw;
 
   return (
-    <button onClick={refresh}
-      disabled={state === "syncing"}
-      className={clsx(
-        "inline-flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg border transition-colors shrink-0",
-        state === "ok"    && "border-emerald-200 bg-emerald-50 text-emerald-700",
-        state === "error" && "border-red-200 bg-red-50 text-red-700",
-        (state === "idle" || state === "syncing") && "border-gray-200 bg-white text-gray-700 hover:border-gray-400 hover:bg-gray-50 disabled:opacity-60",
-      )}>
-      <Icon size={13} className={state === "syncing" ? "animate-spin" : ""} />
-      {label}
-    </button>
+    <div className="inline-flex flex-col items-end gap-1 shrink-0">
+      <button onClick={refresh}
+        disabled={state === "syncing"}
+        className={clsx(
+          "inline-flex items-center gap-2 text-xs font-medium px-3 py-2 rounded-lg border transition-colors",
+          state === "ok"    && "border-emerald-200 bg-emerald-50 text-emerald-700",
+          state === "error" && "border-red-200 bg-red-50 text-red-700",
+          (state === "idle" || state === "syncing") && "border-gray-200 bg-white text-gray-700 hover:border-gray-400 hover:bg-gray-50 disabled:opacity-60",
+        )}>
+        <Icon size={13} className={state === "syncing" ? "animate-spin" : ""} />
+        {label}
+      </button>
+      {state === "error" && errorMsg && (
+        <span className="text-[10px] text-red-600 max-w-xs text-right" title={errorMsg}>
+          {errorMsg}
+        </span>
+      )}
+    </div>
   );
 }
