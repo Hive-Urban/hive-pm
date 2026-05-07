@@ -113,8 +113,11 @@ async function notifyAssignees(notionPageId: string, flaggedBy: string | null) {
     return result;
   }
 
-  const message = buildAcuteSlackMessage(task, flaggedBy);
-  const sentTo = new Set<string>();
+  // Resolve every assignee → rnd_members row first, so we can build a
+  // single message that mentions everyone (Slack `<@U...>` syntax) and
+  // then DM the same body to each of them. The mention also reads well
+  // if a recipient forwards the message into a channel later.
+  const recipients: Array<{ memberName: string; slackId: string }> = [];
   for (const name of names) {
     const member = (members ?? []).find(m =>
       normalizeName(m.full_name) === name ||
@@ -128,21 +131,32 @@ async function notifyAssignees(notionPageId: string, flaggedBy: string | null) {
       result.failures.push(`${member.full_name}: no slack_user_id`);
       continue;
     }
-    if (sentTo.has(member.slack_user_id)) continue;
-    sentTo.add(member.slack_user_id);
+    if (recipients.some(r => r.slackId === member.slack_user_id)) continue;
+    recipients.push({ memberName: member.full_name, slackId: member.slack_user_id });
+  }
+
+  if (recipients.length === 0) return result;
+  const slackMentions = recipients.map(r => `<@${r.slackId}>`).join(" ");
+  const message = buildAcuteSlackMessage(task, flaggedBy, slackMentions);
+
+  for (const r of recipients) {
     result.attempted++;
-    const r = await sendSlackDM(member.slack_user_id, message);
-    if (r.ok) result.sent++;
-    else result.failures.push(`${member.full_name}: ${r.reason}`);
+    const sendRes = await sendSlackDM(r.slackId, message);
+    if (sendRes.ok) result.sent++;
+    else result.failures.push(`${r.memberName}: ${sendRes.reason}`);
   }
   return result;
 }
 
-function buildAcuteSlackMessage(task: { name: string; notion_id: number | null; page_url: string }, flaggedBy: string | null): string {
+function buildAcuteSlackMessage(
+  task: { name: string; notion_id: number | null; page_url: string },
+  flaggedBy: string | null,
+  slackMentions: string
+): string {
   const idStr = task.notion_id != null ? `#${task.notion_id} ` : "";
   const flagLine = flaggedBy ? `\nFlagged by: ${flaggedBy}` : "";
   return [
-    `:rotating_light: *High-profile task — please communicate ongoing status.*`,
+    `${slackMentions} :rotating_light: *High-profile task — please communicate ongoing status.*`,
     `<${task.page_url}|${idStr}${task.name}>`,
     `This task has been marked *acute* in PM. Please reply here (or in the task) with current status, blockers, and ETA so the team can stay aligned.${flagLine}`,
   ].join("\n");
