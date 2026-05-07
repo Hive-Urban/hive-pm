@@ -661,31 +661,6 @@ export default function GanttChart({ pillars, orphanTasks = [] }: Props) {
     });
   }, [allPillars, allSprints, visibleSprints, normalized, sortBy, notionIdMap, now]);
 
-  // Completion % per sprint — weighted average across pillars where each
-  // task from a real pillar contributes weight 1, but Others-pillar tasks
-  // contribute weight 1/3 (they represent unplanned/auto-collected work and
-  // shouldn't dominate the sprint metric just by volume).
-  // Like sprintStats, iterate over ALL pillars so the % shown in the
-  // sprint chip is correct even when that sprint isn't currently expanded.
-  const OTHERS_TASK_WEIGHT = 1 / 3;
-  const sprintCompletion = useMemo(() => {
-    const map = new Map<number, number>();
-    for (const s of allSprints) {
-      let weightedSum = 0;
-      let weightTotal = 0;
-      for (const p of allPillars) {
-        const pillarWeight = p.id === "__others__" ? OTHERS_TASK_WEIGHT : 1;
-        for (const t of p.tasks ?? []) {
-          if (sprintForTask(t, allSprints, now)?.index !== s.index) continue;
-          weightedSum += taskCompletion(t) * pillarWeight;
-          weightTotal += pillarWeight;
-        }
-      }
-      map.set(s.index, weightTotal === 0 ? 0 : weightedSum / weightTotal);
-    }
-    return map;
-  }, [allSprints, allPillars, now]);
-
   // Per-sprint head-count stats — total tasks, how many are done/approved,
   // how many in progress, etc. Used by the sprint chip tooltip and the
   // SprintMetaEditor so the user sees concrete numbers, not just a %.
@@ -723,6 +698,27 @@ export default function GanttChart({ pillars, orphanTasks = [] }: Props) {
     }
     return map;
   }, [allSprints, allPillars, now]);
+
+  // Completion % per sprint — done / total (binary). Aligned with the
+  // figure shown in the SprintMetaEditor's "% done" cell so the chip
+  // outside and the editor inside report the same number. We used to
+  // expose a weighted average (Done=0.8, Approved=1.0, In Progress=0.3
+  // …) which read 64% while the editor said 84% for the same sprint
+  // — confusing enough that the simpler "ratio of finished tasks"
+  // metric is preferable, even though it gives no partial credit for
+  // in-progress work.
+  const sprintCompletion = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const s of allSprints) {
+      const stat = sprintStats.get(s.index);
+      if (!stat || stat.total === 0) {
+        map.set(s.index, 0);
+        continue;
+      }
+      map.set(s.index, stat.done / stat.total);
+    }
+    return map;
+  }, [allSprints, sprintStats]);
 
   // Sprint chips behave like radio buttons — selecting one deselects the
   // rest, and clicking the already-active chip is a no-op (we never want
