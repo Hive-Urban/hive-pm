@@ -64,6 +64,10 @@ type SprintStats = {
   in_progress: number;
   todo: number;
   blocked: number;
+  bugs: number;
+  features: number;
+  production: number;
+  other: number;           // tasks whose tags don't carry bug/feature/production
 };
 const LABEL_WIDTH_DEFAULT = 360;
 const LABEL_WIDTH_MIN = 220;
@@ -692,7 +696,10 @@ export default function GanttChart({ pillars, orphanTasks = [] }: Props) {
   const sprintStats = useMemo(() => {
     const map = new Map<number, SprintStats>();
     for (const s of allSprints) {
-      const stats: SprintStats = { total: 0, done: 0, in_progress: 0, todo: 0, blocked: 0 };
+      const stats: SprintStats = {
+        total: 0, done: 0, in_progress: 0, todo: 0, blocked: 0,
+        bugs: 0, features: 0, production: 0, other: 0,
+      };
       for (const p of allPillars) {
         for (const t of p.tasks ?? []) {
           if (sprintForTask(t, allSprints, now)?.index !== s.index) continue;
@@ -702,6 +709,14 @@ export default function GanttChart({ pillars, orphanTasks = [] }: Props) {
           else if (state === "in_progress") stats.in_progress += 1;
           else if (state === "blocked") stats.blocked += 1;
           else stats.todo += 1;
+          // Notion `type` is mirrored into DB tags at import time
+          // (apps/pm/src/app/api/tasks/{assign,pin-notion}/route.ts:51)
+          // — read it back from there for the breakdown.
+          const tags = (t.tags ?? []).map(x => x.toLowerCase());
+          if (tags.includes("bug")) stats.bugs += 1;
+          else if (tags.includes("feature")) stats.features += 1;
+          else if (tags.includes("production")) stats.production += 1;
+          else stats.other += 1;
         }
       }
       map.set(s.index, stats);
@@ -1527,6 +1542,47 @@ function SprintMetaEditor({ idx, initialName, initialComment, initialGoals, defa
             </div>
           </div>
         )}
+
+        {/* Type breakdown — Bugs / Features / Production / Other. Color-
+            coded chips matching the same palette used in the Hot tasks
+            panel header so the user reads the same signal everywhere. */}
+        {stats && stats.total > 0 && (() => {
+          const segs: Array<{ label: string; n: number; pct: number; bar: string; chip: string }> = [];
+          const T = stats.total;
+          if (stats.bugs > 0)
+            segs.push({ label: "Bugs", n: stats.bugs, pct: (stats.bugs / T) * 100,
+              bar: "bg-red-500", chip: "bg-red-50 text-red-700 border-red-200" });
+          if (stats.features > 0)
+            segs.push({ label: "Features", n: stats.features, pct: (stats.features / T) * 100,
+              bar: "bg-indigo-500", chip: "bg-indigo-50 text-indigo-700 border-indigo-200" });
+          if (stats.production > 0)
+            segs.push({ label: "Production", n: stats.production, pct: (stats.production / T) * 100,
+              bar: "bg-amber-500", chip: "bg-amber-50 text-amber-700 border-amber-200" });
+          if (stats.other > 0)
+            segs.push({ label: "Other", n: stats.other, pct: (stats.other / T) * 100,
+              bar: "bg-gray-300", chip: "bg-gray-100 text-gray-600 border-gray-200" });
+          return (
+            <div className="-mt-3 mb-5">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-[10px] uppercase tracking-wider text-gray-400">Type breakdown</span>
+                <span className="text-[10px] text-gray-400 tabular-nums">{T} task{T === 1 ? "" : "s"}</span>
+              </div>
+              <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+                {segs.map(s => (
+                  <div key={s.label} className={s.bar} style={{ width: `${s.pct}%` }} title={`${s.label}: ${s.n} · ${Math.round(s.pct)}%`} />
+                ))}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {segs.map(s => (
+                  <span key={s.label}
+                    className={"text-[10px] px-1.5 py-0.5 rounded border tabular-nums " + s.chip}>
+                    {s.n} {s.label.toLowerCase()} <span className="opacity-60">· {Math.round(s.pct)}%</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          );
+        })()}
 
         <label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
         <input
