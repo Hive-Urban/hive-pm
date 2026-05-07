@@ -317,18 +317,34 @@ export default function NotionTasksSummary({ pillars }: Props) {
       }
     } catch { /* noop */ }
 
-    fetch("/api/notion/tasks?includeAssigned=true")
-      .then(r => r.json())
-      .then(data => {
+    async function fetchFresh(useCache: boolean) {
+      try {
+        const res = await fetch("/api/notion/tasks?includeAssigned=true", {
+          cache: useCache ? "default" : "no-store",
+        });
+        const data = await res.json();
         if (cancelled) return;
         if (data.error) setError(data.error);
         else {
           setTasks(data.tasks ?? []);
           try { localStorage.setItem("notion:tasks-cache", JSON.stringify({ tasks: data.tasks ?? [] })); } catch { /* noop */ }
         }
-      })
-      .catch(err => { if (!cancelled) setError(String(err?.message ?? err)); });
-    return () => { cancelled = true; };
+      } catch (err: unknown) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+      }
+    }
+    void fetchFresh(true);
+
+    // Refresh Data dispatches "hive:notion-refreshed" after the server
+    // sync completes — re-pull the live tasks payload (bypassing HTTP
+    // cache) so the Hot/Production panels reflect the same status that
+    // the Newly Done sampling just recorded.
+    function onRefreshed() { void fetchFresh(false); }
+    window.addEventListener("hive:notion-refreshed", onRefreshed);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("hive:notion-refreshed", onRefreshed);
+    };
   }, []);
 
   const hot = useMemo(
