@@ -40,6 +40,9 @@ export async function GET(req: NextRequest) {
 //   body: { member_id, notion_page_id, notion_id?, notion_name? }
 // Opens a check on a task. If a check is already open for the same
 // (member, notion_page_id) pair, the unique partial index forces a no-op.
+// Side effect: if the member has no open work session, we clock them in
+// automatically — checking a task is an explicit "I'm working right now"
+// signal and shouldn't require a separate Clock in click.
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -59,9 +62,11 @@ export async function POST(req: NextRequest) {
       })
       .select()
       .single();
+    let alreadyOpen = false;
+    let checkRow = data;
     if (error) {
-      // Unique violation = the check is already open. That's fine, return existing.
       if (error.code === "23505") {
+        // Unique violation = the check is already open. That's fine, return existing.
         const { data: existing } = await db
           .from("rnd_task_checks")
           .select("*")
@@ -69,11 +74,42 @@ export async function POST(req: NextRequest) {
           .eq("notion_page_id", notion_page_id)
           .is("ended_at", null)
           .maybeSingle();
-        return NextResponse.json({ ok: true, check: existing, note: "already open" });
+        checkRow = existing;
+        alreadyOpen = true;
+      } else {
+        throw error;
       }
-      throw error;
     }
-    return NextResponse.json({ ok: true, check: data });
+
+    // Auto clock-in: only when the member has no open session right now.
+    // We never close an existing session here — clock-out stays manual.
+    let autoClockedIn = false;
+    let clockError: string | null = null;
+    try {
+      const { data: openSession } = await db
+        .from("rnd_work_sessions")
+        .select("id")
+        .eq("member_id", member_id)
+        .is("ended_at", null)
+        .maybeSingle();
+      if (!openSession) {
+        const { error: insertErr } = await db
+          .from("rnd_work_sessions")
+          .insert({ member_id });
+        if (insertErr) clockError = insertErr.message;
+        else autoClockedIn = true;
+      }
+    } catch (e: unknown) {
+      clockError = e instanceof Error ? e.message : "auto clock-in failed";
+    }
+
+    return NextResponse.json({
+      ok: true,
+      check: checkRow,
+      note: alreadyOpen ? "already open" : undefined,
+      auto_clock_in: autoClockedIn,
+      clock_error: clockError,
+    });
   } catch (err: unknown) {
     const msg = describeError(err);
     console.error("task-checks POST error:", err);
