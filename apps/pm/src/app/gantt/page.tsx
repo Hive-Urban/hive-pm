@@ -27,7 +27,7 @@ export default async function GanttPage() {
       </div>
       <GanttChart pillars={pillars ?? []} orphanTasks={orphanTasks ?? []} />
       <NewlyDoneDigest />
-      <NotionTasksSummary pillars={pillars ?? []} />
+      <NotionTasksSummary pillars={pillars ?? []} orphanTasks={orphanTasks ?? []} />
     </div>
   );
 }

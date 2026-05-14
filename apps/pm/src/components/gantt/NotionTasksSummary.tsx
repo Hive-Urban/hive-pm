@@ -39,6 +39,11 @@ type Pillar = {
 
 type Props = {
   pillars: Pillar[];
+  // Tasks pinned-into-Others (pillar_id null). Without these we lose the
+  // sprint tag of any task assigned via the "Sprint?" dropdown — the chip
+  // appears to revert because the parent's pillars query doesn't include
+  // them and useEffect resets the local map.
+  orphanTasks?: DbTask[];
 };
 
 const PRIORITY_STYLE: Record<string, string> = {
@@ -113,7 +118,7 @@ function isDoneStatus(s: string | null): boolean {
   return v === "done" || v === "complete" || v === "approved";
 }
 
-export default function NotionTasksSummary({ pillars }: Props) {
+export default function NotionTasksSummary({ pillars, orphanTasks = [] }: Props) {
   const router = useRouter();
   const [tasks, setTasks] = useState<NotionTask[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -205,6 +210,13 @@ export default function NotionTasksSummary({ pillars }: Props) {
   // Map: notion_page_id -> explicit sprint index (only if the DB row carries
   // a sprint:N tag). Tasks without a DB row, or without an explicit tag,
   // show as "Unassigned" in the dropdown.
+  //
+  // Includes BOTH pillar tasks AND orphans (pinned-to-Others rows with
+  // pillar_id null). Earlier the orphan branch was ignored, so picking a
+  // sprint from the Hot panel chip appeared to revert: the server saved
+  // the new sprint:N tag onto a pillar_id-null row, the parent's pillars
+  // query never returned that row, and useEffect reset the optimistic
+  // map to empty on every router.refresh().
   const sprintByPageId = useMemo(() => {
     const map = new Map<string, number>();
     for (const p of pillars) {
@@ -214,8 +226,13 @@ export default function NotionTasksSummary({ pillars }: Props) {
         if (idx != null) map.set(t.notion_page_id, idx);
       }
     }
+    for (const t of orphanTasks) {
+      if (!t.notion_page_id) continue;
+      const idx = explicitSprintIndex(t.tags ?? null);
+      if (idx != null) map.set(t.notion_page_id, idx);
+    }
     return map;
-  }, [pillars]);
+  }, [pillars, orphanTasks]);
   const [sprintByPageIdLocal, setSprintByPageIdLocal] = useState<Map<string, number>>(sprintByPageId);
   useEffect(() => { setSprintByPageIdLocal(sprintByPageId); }, [sprintByPageId]);
 
@@ -373,8 +390,66 @@ export default function NotionTasksSummary({ pillars }: Props) {
     [tasks, productionNotDone, acuteIds]
   );
 
+  // Distinct (product, count) pairs for tasks NOT currently assigned to
+  // a pillar — fuel for the Bulk-by-product modal.
+  const unassignedByProduct = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const t of tasks ?? []) {
+      if (!t.product) continue;
+      if (pillarByPageId.has(t.id)) continue; // already on a pillar
+      counts.set(t.product, (counts.get(t.product) ?? 0) + 1);
+    }
+    return [...counts.entries()]
+      .map(([product, count]) => ({ product, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [tasks, pillarByPageId]);
+
+  const [bulkOpen, setBulkOpen] = useState(false);
+
+  async function bulkAssign(product: string, pillarId: string): Promise<{ moved: number; created: number; skipped: number; matched: number }> {
+    const res = await fetch("/api/tasks/bulk-assign-by-product", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ product, pillar_id: pillarId }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body?.error ?? `HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    router.refresh();
+    return {
+      moved: data?.moved ?? 0,
+      created: data?.created ?? 0,
+      skipped: data?.skipped ?? 0,
+      matched: data?.matched ?? 0,
+    };
+  }
+
   return (
     <div className="space-y-4">
+      {/* Quick bulk-assign affordance — visible when there are unassigned
+          Notion tasks with a product tag. Click → modal to map each
+          product to a pillar in one operation. */}
+      {unassignedByProduct.length > 0 && (
+        <div className="flex items-center justify-end">
+          <button onClick={() => setBulkOpen(true)}
+            className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-md border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100">
+            Bulk assign by product
+            <span className="text-[10px] text-indigo-500 tabular-nums">· {unassignedByProduct.reduce((a, b) => a + b.count, 0)}</span>
+          </button>
+        </div>
+      )}
+
+      {bulkOpen && (
+        <BulkAssignByProductModal
+          groups={unassignedByProduct}
+          pillars={pillars}
+          onClose={() => setBulkOpen(false)}
+          onApply={bulkAssign}
+        />
+      )}
+
       <DigestPanel
         title="משימות חמות"
         subtitle={hotScope === "urgent" ? "Urgent · Not Started · In Progress" : "Urgent + High · Not Started · In Progress"}
@@ -1088,5 +1163,104 @@ function AssigneeMenu({ task, onChange }: {
       </button>
       {typeof window !== "undefined" && menu && createPortal(menu, document.body)}
     </>
+  );
+}
+
+// One-shot modal: pick a product (from the list of products with
+// currently-unassigned Notion tasks) + pick a pillar → move every
+// matching task in a single call. Hidden behind the toolbar button
+// because the action is destructive-ish (touches many rows at once).
+function BulkAssignByProductModal({ groups, pillars, onClose, onApply }: {
+  groups: Array<{ product: string; count: number }>;
+  pillars: Pillar[];
+  onClose: () => void;
+  onApply: (product: string, pillarId: string) => Promise<{ moved: number; created: number; skipped: number; matched: number }>;
+}) {
+  const [product, setProduct] = useState<string | "">(groups[0]?.product ?? "");
+  const [pillarId, setPillarId] = useState<string | "">(pillars[0]?.id ?? "");
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const selectedCount = groups.find(g => g.product === product)?.count ?? 0;
+  const canApply = !!product && !!pillarId && selectedCount > 0 && !busy;
+
+  async function apply() {
+    if (!canApply) return;
+    setBusy(true);
+    setResult(null);
+    try {
+      const r = await onApply(product, pillarId);
+      setResult({
+        ok: true,
+        text: `Moved ${r.moved + r.created} of ${r.matched} ${product} tasks` +
+              (r.skipped > 0 ? ` (${r.skipped} already on another pillar — skipped)` : ""),
+      });
+    } catch (e: unknown) {
+      setResult({ ok: false, text: e instanceof Error ? e.message : "unknown error" });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      onClick={() => !busy && onClose()}>
+      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6"
+        onClick={e => e.stopPropagation()}>
+        <h3 className="text-lg font-semibold text-gray-900 mb-1">Bulk assign by product</h3>
+        <p className="text-xs text-gray-500 mb-4">
+          Pick a product and a pillar — every Notion task tagged with that product
+          gets moved onto the chosen pillar in one shot. Tasks already on a
+          different pillar are left alone.
+        </p>
+
+        <label className="block text-xs font-medium text-gray-600 mb-1">Product</label>
+        <select value={product} onChange={e => setProduct(e.target.value)}
+          className="w-full text-sm px-2 py-1.5 border border-gray-200 rounded mb-4 focus:outline-none focus:border-indigo-400">
+          {groups.length === 0 ? (
+            <option value="">No unassigned products</option>
+          ) : (
+            groups.map(g => (
+              <option key={g.product} value={g.product}>
+                {g.product} · {g.count} unassigned
+              </option>
+            ))
+          )}
+        </select>
+
+        <label className="block text-xs font-medium text-gray-600 mb-1">Target pillar</label>
+        <select value={pillarId} onChange={e => setPillarId(e.target.value)}
+          className="w-full text-sm px-2 py-1.5 border border-gray-200 rounded mb-4 focus:outline-none focus:border-indigo-400">
+          {pillars.length === 0 ? (
+            <option value="">No pillars yet</option>
+          ) : (
+            pillars.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
+            ))
+          )}
+        </select>
+
+        {result && (
+          <p className={clsx(
+            "text-xs mb-3",
+            result.ok ? "text-emerald-700" : "text-red-600"
+          )}>
+            {result.text}
+          </p>
+        )}
+
+        <div className="flex items-center justify-end gap-2">
+          <button onClick={onClose} disabled={busy}
+            className="text-xs px-3 py-1.5 rounded border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-50">
+            Close
+          </button>
+          <button onClick={apply} disabled={!canApply}
+            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
+            {busy ? <Loader2 size={12} className="animate-spin" /> : null}
+            Move {selectedCount} {product || ""} task{selectedCount === 1 ? "" : "s"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
