@@ -21,6 +21,8 @@ type SamplingItem = {
 };
 
 const OPEN_KEY = "notionTasks:newlyDoneOpen";
+const SPRINT_COUNT_KEY = "gantt:sprintCount";
+const DEFAULT_SPRINT_COUNT = 4;
 
 function formatStamp(iso: string | null): string {
   if (!iso) return "—";
@@ -89,6 +91,64 @@ export default function NewlyDoneDigest() {
   const active = useMemo(() => items?.[cursor] ?? null, [items, cursor]);
   const canGoOlder = items != null && cursor < items.length - 1;
   const canGoNewer = cursor > 0;
+
+  // Sprint count mirrors the Gantt's localStorage value so the chip
+  // dropdown lists exactly the sprints that exist in the gantt.
+  const [sprintCount, setSprintCount] = useState<number>(DEFAULT_SPRINT_COUNT);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SPRINT_COUNT_KEY);
+      const n = raw ? parseInt(raw, 10) : NaN;
+      if (Number.isFinite(n) && n > 0) setSprintCount(n);
+    } catch { /* noop */ }
+  }, []);
+
+  // Sprint state for the *currently visible* sampling's tasks, keyed by
+  // notion_page_id. Refetched whenever the active sampling changes.
+  // Empty map until the lookup returns — chip falls back to "Sprint?".
+  const [sprintByPageId, setSprintByPageId] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!active || active.newly_done.length === 0) {
+      setSprintByPageId({});
+      return;
+    }
+    const ids = active.newly_done.map(t => t.notion_page_id);
+    let cancelled = false;
+    fetch("/api/tasks/sprint-by-page-id", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        if (cancelled) return;
+        setSprintByPageId(data?.sprintByPageId ?? {});
+      })
+      .catch(() => { if (!cancelled) setSprintByPageId({}); });
+    return () => { cancelled = true; };
+  }, [active]);
+
+  async function assignSprint(notionPageId: string, sprintIdx: number): Promise<void> {
+    // Optimistic chip update — flips to the new sprint immediately,
+    // rolls back if the server rejects.
+    const prev = sprintByPageId[notionPageId];
+    setSprintByPageId(s => ({ ...s, [notionPageId]: sprintIdx }));
+    try {
+      const res = await fetch("/api/tasks/pin-notion", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notion_page_id: notionPageId, sprintIndex: sprintIdx }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    } catch {
+      setSprintByPageId(s => {
+        const next = { ...s };
+        if (prev == null) delete next[notionPageId];
+        else next[notionPageId] = prev;
+        return next;
+      });
+    }
+  }
 
   return (
     <div className="bg-white border border-gray-200 rounded-2xl shadow-sm">
@@ -195,6 +255,11 @@ export default function NewlyDoneDigest() {
                         )}>
                           {t.assignee ?? "Unassigned"}
                         </span>
+                        <SprintChip
+                          current={sprintByPageId[t.notion_page_id] ?? null}
+                          count={sprintCount}
+                          onPick={idx => assignSprint(t.notion_page_id, idx)}
+                        />
                         <a href={url} target="_blank" rel="noopener noreferrer"
                           onClick={e => e.stopPropagation()}
                           className="text-gray-300 hover:text-gray-600 shrink-0"
@@ -211,5 +276,56 @@ export default function NewlyDoneDigest() {
         </div>
       )}
     </div>
+  );
+}
+
+// Compact sprint picker. The native <select> overlay handles open/close,
+// so we don't need to maintain a portal or click-outside listeners like
+// the Hot tasks panel does. Trade-off: the dropdown is a system menu
+// rather than a custom popover, but for a "Newly Done" retrospective
+// chip that fits the row density better.
+function SprintChip({ current, count, onPick }: {
+  current: number | null;
+  count: number;
+  onPick: (idx: number) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState(false);
+  const indices = useMemo(() => Array.from({ length: Math.max(1, count) }, (_, i) => i + 1), [count]);
+
+  async function handleChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    e.stopPropagation();
+    const v = parseInt(e.target.value, 10);
+    if (!Number.isFinite(v) || v <= 0) return;
+    setBusy(true);
+    try { await onPick(v); } finally { setBusy(false); }
+  }
+
+  return (
+    <label
+      onClick={e => e.stopPropagation()}
+      className={clsx(
+        "relative inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded border shrink-0 cursor-pointer",
+        current != null
+          ? "border-gray-200 text-gray-600 hover:border-gray-400"
+          : "border-dashed border-gray-300 text-gray-400 hover:text-gray-600 hover:border-gray-400"
+      )}
+      title={current != null ? `Sprint ${current} — change` : "Pin to a sprint"}
+    >
+      <span className="tabular-nums">{current != null ? `S${current}` : "Sprint?"}</span>
+      {busy
+        ? <Loader2 size={10} className="animate-spin" />
+        : <ChevronDown size={10} className="opacity-60" />}
+      <select
+        value={current ?? ""}
+        onChange={handleChange}
+        disabled={busy}
+        className="absolute inset-0 opacity-0 cursor-pointer"
+      >
+        <option value="" disabled>Pick a sprint…</option>
+        {indices.map(i => (
+          <option key={i} value={i}>Sprint {i}</option>
+        ))}
+      </select>
+    </label>
   );
 }
