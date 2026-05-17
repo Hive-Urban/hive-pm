@@ -1,6 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 
+// Supabase errors are plain objects with message/details/hint/code — they
+// fail `instanceof Error`, so a naive `err.message` extraction loses all
+// signal and the client sees "unknown error". Surface every field so the
+// admin UI can show e.g. "column rnd_members.is_manager does not exist".
+function describeError(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === "object") {
+    const e = err as { message?: string; details?: string; hint?: string; code?: string };
+    const parts = [e.message, e.details, e.hint, e.code ? `(code ${e.code})` : null].filter(Boolean);
+    if (parts.length > 0) return parts.join(" · ");
+    try { return JSON.stringify(err); } catch { /* noop */ }
+  }
+  return "unknown error";
+}
+
 // PATCH /api/members/[id] — partial update
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -23,8 +38,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (error) throw error;
     return NextResponse.json({ ok: true });
   } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : "unknown error";
-    return NextResponse.json({ error: msg }, { status: 500 });
+    console.error("members PATCH error:", err);
+    return NextResponse.json({ error: describeError(err) }, { status: 500 });
   }
 }
 
