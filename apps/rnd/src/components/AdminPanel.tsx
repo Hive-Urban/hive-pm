@@ -6,7 +6,8 @@ import { Loader2, Plus, Trash2 } from "lucide-react";
 
 type Member = {
   id: string; handle: string; full_name: string; email: string;
-  role: string | null; slack_user_id: string | null; is_admin: boolean; active: boolean;
+  role: string | null; slack_user_id: string | null;
+  is_admin: boolean; is_manager: boolean; active: boolean;
   notion_assignee_name: string | null;
 };
 type SkillCategory = { id: string; name: string; order_index: number; color: string | null };
@@ -57,7 +58,7 @@ function MembersTab({ members }: { members: Member[] }) {
   const [error, setError] = useState<string | null>(null);
   const [form, setForm] = useState({
     handle: "", full_name: "", email: "", role: "", slack_user_id: "",
-    notion_assignee_name: "", is_admin: false,
+    notion_assignee_name: "", is_admin: false, is_manager: false,
   });
 
   async function add() {
@@ -69,7 +70,7 @@ function MembersTab({ members }: { members: Member[] }) {
         body: JSON.stringify(form),
       });
       if (!res.ok) throw new Error((await res.json())?.error ?? "Failed");
-      setForm({ handle: "", full_name: "", email: "", role: "", slack_user_id: "", notion_assignee_name: "", is_admin: false });
+      setForm({ handle: "", full_name: "", email: "", role: "", slack_user_id: "", notion_assignee_name: "", is_admin: false, is_manager: false });
       router.refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "unknown");
@@ -117,6 +118,12 @@ function MembersTab({ members }: { members: Member[] }) {
               className="w-4 h-4 accent-indigo-600" />
             Admin
           </label>
+          <label className="flex items-center gap-2 text-sm text-gray-600">
+            <input type="checkbox" checked={form.is_manager}
+              onChange={e => setForm({ ...form, is_manager: e.target.checked })}
+              className="w-4 h-4 accent-emerald-600" />
+            Manager (read-only Team view)
+          </label>
         </div>
         <div className="flex items-center gap-3">
           <button onClick={add} disabled={busy || !form.handle || !form.full_name || !form.email}
@@ -138,12 +145,13 @@ function MembersTab({ members }: { members: Member[] }) {
               <th className="px-4 py-2 text-left">Email</th>
               <th className="px-4 py-2 text-left">Role</th>
               <th className="px-4 py-2 text-left">Slack</th>
+              <th className="px-4 py-2 text-left">Roles</th>
               <th className="px-4 py-2" />
             </tr>
           </thead>
           <tbody>
             {members.length === 0 && (
-              <tr><td colSpan={7} className="px-4 py-8 text-center text-gray-400 text-sm">No members yet.</td></tr>
+              <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400 text-sm">No members yet.</td></tr>
             )}
             {members.map(m => (
               <MemberRowEditable key={m.id} member={m} busy={busy} onRemove={remove} />
@@ -164,15 +172,17 @@ function MemberRowEditable({ member, busy, onRemove }: {
   const [fullName, setFullName] = useState(member.full_name);
   const [notionName, setNotionName] = useState(member.notion_assignee_name ?? "");
   const [email, setEmail] = useState(member.email);
-  const [saving, setSaving] = useState<"full_name" | "notion_assignee_name" | "email" | null>(null);
+  const [saving, setSaving] = useState<"full_name" | "notion_assignee_name" | "email" | "is_admin" | "is_manager" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function patch(field: "full_name" | "notion_assignee_name" | "email", value: string) {
+  async function patch(field: "full_name" | "notion_assignee_name" | "email", value: string): Promise<void>;
+  async function patch(field: "is_admin" | "is_manager", value: boolean): Promise<void>;
+  async function patch(field: "full_name" | "notion_assignee_name" | "email" | "is_admin" | "is_manager", value: string | boolean): Promise<void> {
     setSaving(field);
     setError(null);
     try {
-      const payload: Record<string, string | null> =
-        field === "notion_assignee_name" ? { [field]: value || null } : { [field]: value };
+      const payload: Record<string, string | boolean | null> =
+        field === "notion_assignee_name" ? { [field]: (value as string) || null } : { [field]: value };
       const res = await fetch(`/api/members/${member.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -227,6 +237,34 @@ function MemberRowEditable({ member, busy, onRemove }: {
       </td>
       <td className="px-4 py-2 text-gray-700">{member.role}</td>
       <td className="px-4 py-2 text-gray-500 text-xs font-mono">{member.slack_user_id ?? "—"}</td>
+      <td className="px-4 py-2">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => patch("is_admin", !member.is_admin)}
+            disabled={saving === "is_admin"}
+            title={member.is_admin ? "Admin — click to revoke" : "Click to grant admin"}
+            className={clsx(
+              "text-[10px] px-1.5 py-0.5 rounded border transition-colors tabular-nums disabled:opacity-50",
+              member.is_admin
+                ? "bg-indigo-600 text-white border-indigo-700"
+                : "bg-gray-50 text-gray-500 border-gray-200 hover:border-indigo-300 hover:text-indigo-700"
+            )}>
+            Admin
+          </button>
+          <button
+            onClick={() => patch("is_manager", !member.is_manager)}
+            disabled={saving === "is_manager"}
+            title={member.is_manager ? "Manager — click to revoke" : "Click to grant manager (read-only Team view)"}
+            className={clsx(
+              "text-[10px] px-1.5 py-0.5 rounded border transition-colors tabular-nums disabled:opacity-50",
+              member.is_manager
+                ? "bg-emerald-600 text-white border-emerald-700"
+                : "bg-gray-50 text-gray-500 border-gray-200 hover:border-emerald-300 hover:text-emerald-700"
+            )}>
+            Manager
+          </button>
+        </div>
+      </td>
       <td className="px-4 py-2 text-right">
         <button onClick={() => onRemove(member.id)} disabled={busy}
           className="text-gray-300 hover:text-red-600 disabled:opacity-50">

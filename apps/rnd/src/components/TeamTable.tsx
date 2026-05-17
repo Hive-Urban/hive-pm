@@ -91,13 +91,37 @@ type WorkStatus = {
   ended_at: string | null;
 };
 
-export default function TeamTable({ members, skills, repos, viewerId = null, viewerIsAdmin = false }: {
+export default function TeamTable({
+  members,
+  skills,
+  repos,
+  viewerId = null,
+  viewerIsAdmin = false,
+  viewerIsManager = false,
+  viewMode = "auto",
+}: {
   members: Member[];
   skills: Skill[];
   repos: Repo[];
   viewerId?: string | null;
   viewerIsAdmin?: boolean;
+  viewerIsManager?: boolean;
+  // "auto" — derive controls from viewerIsAdmin/viewerIsManager/self
+  // "manager" — force the read-only manager view (used by the admin toggle)
+  viewMode?: "auto" | "manager";
 }) {
+  // Manager view = admin can expand any row and read state, but cannot
+  // take any action (clock in/out, End of Day, check/uncheck tasks).
+  // Admins explicitly invoke this via the toggle on the /team page; pure
+  // managers (is_manager && !is_admin) land here on every visit.
+  const isManagerView = viewMode === "manager" || (!viewerIsAdmin && viewerIsManager);
+  // Anyone who is admin OR manager (or in manager-view) can expand every
+  // member's row to see what they're working on. Regular members keep
+  // self-only expansion.
+  const canExpandAll = viewerIsAdmin || viewerIsManager;
+  // Only the real (un-toggled) admin gets action buttons. Manager view
+  // strips them whether the underlying viewer is admin or not.
+  const showAdminActions = viewerIsAdmin && !isManagerView;
   const [tasks, setTasks] = useState<ByAssignee | null>(null);
   const [taskError, setTaskError] = useState<string | null>(null);
   const [checks, setChecks] = useState<TaskCheck[]>([]);
@@ -256,11 +280,17 @@ export default function TeamTable({ members, skills, repos, viewerId = null, vie
   }
 
   function canManage(memberId: string): boolean {
+    // Manager view never allows actions, even for the admin who toggled
+    // into it. Regular admins keep full control over every row; everyone
+    // else can manage their own row only.
+    if (isManagerView) return false;
     return viewerIsAdmin || viewerId === memberId;
   }
   function canExpand(memberId: string): boolean {
-    // Admin can expand anyone, regular members only themselves.
-    return canManage(memberId);
+    // Admin/manager — and anyone with canExpandAll — sees what everyone
+    // is working on. Regular members keep self-only expansion.
+    if (canExpandAll) return true;
+    return viewerId === memberId;
   }
 
   function toggleExpand(memberId: string) {
@@ -402,7 +432,7 @@ export default function TeamTable({ members, skills, repos, viewerId = null, vie
             : <RefreshCw size={13} />}
           {refreshing ? "Refreshing…" : "Refresh"}
         </button>
-        {viewerIsAdmin && <button onClick={() => void endDay()}
+        {showAdminActions && <button onClick={() => void endDay()}
           disabled={endingDay}
           title="Clock out every team member"
           className={clsx(
